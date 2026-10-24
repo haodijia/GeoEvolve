@@ -7,7 +7,6 @@
 Usage:
 python evaluation/run_pipeline.py \
     --base-dir <RESULTS_DIR> \
-    --model-name <MODEL_NAME> \
     --rounds 1,2,3 \
     --result-dir-name <TAG>
 """
@@ -73,12 +72,6 @@ def main() -> int:
         help="Model run directory (contains results_attempt_*.jsonl, log, experiment_summary.json)",
     )
     parser.add_argument(
-        "--model-name",
-        default=None,
-        help="Used to infer log filename: {model_name}_AP_langchain.log. "
-             "If omitted, read from base-dir/experiment_config.yaml",
-    )
-    parser.add_argument(
         "--result-dir-name",
         required=True,
         help="Folder name under results/ to store evaluation outputs",
@@ -119,17 +112,6 @@ def main() -> int:
     args = parser.parse_args()
 
     base_dir = Path(args.base_dir)
-
-    if args.model_name is None:
-        exp_cfg = base_dir / "experiment_config.yaml"
-        if exp_cfg.exists():
-            import yaml
-            cfg_data = yaml.safe_load(exp_cfg.read_text(encoding="utf-8")) or {}
-            args.model_name = cfg_data.get("model_name", "deepseek-chat")
-            print(f"  model-name inferred from experiment_config.yaml: {args.model_name}")
-        else:
-            args.model_name = "deepseek-chat"
-            print(f"  Warning: no experiment_config.yaml found, defaulting model-name to {args.model_name}")
 
     here = Path(__file__).resolve().parent
     results_dir = here / "results" / args.result_dir_name
@@ -200,8 +182,8 @@ def main() -> int:
                 str(extract_script),
                 "--base-dir",
                 str(base_dir),
-                "--model-name",
-                args.model_name,
+                "--rounds",
+                ",".join(str(r) for r in rounds),
             ],
             outputs=extracted_outputs,
         ),

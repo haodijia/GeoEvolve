@@ -21,6 +21,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable
 
+from rsmem.tokens import MeteredModel, sum_usage_ledger
+
 _TRUNCATION_REGISTRY: dict[str, Callable] = {}
 _TRAJECTORY_REGISTRY: dict[str, Callable] = {}
 _REFLECTION_REGISTRY: dict[str, Callable] = {}
@@ -85,7 +87,7 @@ async def generate_reflections_for_failed_questions(
     reflection_strategy: str = "default",
     reflection_kwargs: dict[str, Any] | None = None,
     trajectory_kwargs: dict[str, Any] | None = None,
-    reflection_failure_policy: str = "fallback",
+    usage_path: Path,
 ) -> tuple[list, dict[str, int]]:
     """Batch-generate reflections (Reflexion-style FAR) using pluggable strategies.
 
@@ -96,15 +98,10 @@ async def generate_reflections_for_failed_questions(
     consume keys such as ``previous_reflection`` or ``num_candidates``.
     """
     reflections: list[dict[str, Any]] = []
-    total_reflection_tokens = {
-        "prompt_tokens": 0,
-        "completion_tokens": 0,
-        "total_tokens": 0,
-    }
-    extra = reflection_kwargs or {}
+    extra = dict(reflection_kwargs or {})
     trajectory_extra = trajectory_kwargs or {}
-    if reflection_failure_policy not in {"fallback", "error"}:
-        raise ValueError("reflection_failure_policy must be 'fallback' or 'error'")
+    usage_path.parent.mkdir(parents=True, exist_ok=True)
+    usage_path.touch(exist_ok=True)
 
     truncate_fn = get_truncation(truncation_strategy)
     traj_fn = get_trajectory(trajectory_strategy)
@@ -129,39 +126,26 @@ async def generate_reflections_for_failed_questions(
             **trajectory_extra,
         )
 
+        question_extra = dict(extra)
+        if "compressor_llm" in question_extra:
+            question_extra["compressor_llm"] = MeteredModel(
+                question_extra["compressor_llm"], usage_path, question_id, "compressor"
+            )
         reflection = await reflect_fn(
-            llm=llm,
+            llm=MeteredModel(llm, usage_path, question_id, "reflector"),
             question_id=question_id,
             attempt=attempt_num,
             question_text=trajectory_data["question_text"],
             retrieved_context=trajectory_data["retrieved_context"],
             trajectory=trajectory_data["trajectory"],
-            **extra,
+            **question_extra,
         )
 
-        if reflection:
-            reflections.append(reflection)
-            if "token_usage" in reflection:
-                tu = reflection["token_usage"]
-                total_reflection_tokens["prompt_tokens"] += tu.get("prompt_tokens", 0)
-                total_reflection_tokens["completion_tokens"] += tu.get("completion_tokens", 0)
-                total_reflection_tokens["total_tokens"] += tu.get("total_tokens", 0)
-        else:
-            if reflection_failure_policy == "error":
-                raise RuntimeError(
-                    f"reflection generation failed for Q{question_id}; fallback disabled"
-                )
-            fallback_reflection = {
-                "question_id": str(question_id),
-                "reflective_text": (
-                    "Previous attempt failed. Please review the tool workflow and "
-                    "ensure all steps are completed correctly, paying special attention "
-                    "to data paths and final answer format."
-                ),
-            }
-            reflections.append(fallback_reflection)
-            print(f"  → Using fallback reflection for Q{question_id}")
+        if not reflection:
+            raise RuntimeError(f"Reflection generation failed for Q{question_id}")
+        reflections.append(reflection)
 
+    total_reflection_tokens = sum_usage_ledger(usage_path)
     print(f"\n✓ Generated {len(reflections)} reflections")
     if total_reflection_tokens["total_tokens"] > 0:
         print(f"  Reflection tokens: {total_reflection_tokens['total_tokens']} total")

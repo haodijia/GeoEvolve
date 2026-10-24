@@ -6,6 +6,7 @@ import argparse
 import os
 from pathlib import Path
 from typing import Dict, List, Any, Tuple
+from earthbench_paths import normalize_tool_calls
 
 def load_json_data(file_path: str) -> List[Dict]:
     """Load JSON file data"""
@@ -182,8 +183,8 @@ def check_parameter_accuracy(predicted_data: Dict, ground_truth_data: Dict) -> d
     Check the accuracy of tool call parameters - soft scoring version
     Match step by step, give i/total_steps score when matched to step i
     """
-    predicted_calls = predicted_data.get("tool_calls", [])
-    expected_calls = ground_truth_data.get("tool_calls", [])
+    predicted_calls = normalize_tool_calls(predicted_data["tool_calls"], predicted_data["output_roots"])
+    expected_calls = normalize_tool_calls(ground_truth_data["tool_calls"], [])
     
     if not expected_calls:
         return {
@@ -308,8 +309,7 @@ def run_step_by_step_evaluation(predicted_file: str, ground_truth_file: str) -> 
         }
     }
     
-    # Traverse the first 100 questions
-    for question_index, gt_item in list(gt_dict.items())[:]:
+    for question_index, gt_item in gt_dict.items():
         summary_stats["total_questions"] += 1
         
         if question_index not in pred_dict:
@@ -419,20 +419,14 @@ def main():
         output_file = str(output_dir / f"step_by_step_evaluation_results_round{r}.json")
 
         print("Starting step-by-step evaluation")
-        try:
-            results = run_step_by_step_evaluation(predicted_file, ground_truth_file)
-            print_evaluation_summary(results)
-            print_detailed_results(results)
+        results = run_step_by_step_evaluation(predicted_file, ground_truth_file)
+        print_evaluation_summary(results)
+        print_detailed_results(results)
 
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
 
-            print(f"\nDetailed evaluation results saved to: {output_file}")
-        except Exception as e:
-            print(f"Error during evaluation: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
+        print(f"\nDetailed evaluation results saved to: {output_file}")
 
 if __name__ == "__main__":
     main()

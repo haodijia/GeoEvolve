@@ -104,7 +104,7 @@ def calculate_accuracy(ground_truth_data: List[Dict], predicted_data: Any) -> Di
         is_correct = False
         status = "incorrect"
         
-        if pred_answer == "FAIL":
+        if pred_item["execution_error"] or pred_answer == "FAIL":
             results["fail_answers"] += 1
             status = "fail"
         elif pred_answer == "UNKNOWN":
@@ -136,19 +136,16 @@ def calculate_accuracy(ground_truth_data: List[Dict], predicted_data: Any) -> Di
 
 def load_model_tool_calls(extracted_tool_calls_path: str) -> Dict:
     """Load model tool calls data"""
-    try:
-        data = load_json_data(extracted_tool_calls_path)
-        # Convert to dictionary format, key as question_index
-        tool_calls_dict = {}
-        for item in data:
-            key = item["question_index"]
-            if key.isdigit():
-                key = f"question{key}"
-            tool_calls_dict[key] = item
-        return tool_calls_dict
-    except FileNotFoundError:
-        print(f"Warning: Tool calls file not found: {extracted_tool_calls_path}")
-        return {}
+    data = load_json_data(extracted_tool_calls_path)
+    tool_calls_dict = {}
+    for item in data:
+        key = item["question_index"]
+        if key.isdigit():
+            key = f"question{key}"
+        if key in tool_calls_dict:
+            raise ValueError(f"Duplicate trajectory for {key}")
+        tool_calls_dict[key] = item
+    return tool_calls_dict
 
 def calculate_efficiency_with_tool_calls(ground_truth_data: List[Dict], 
                                        model_tool_calls_data: Dict) -> Dict:
@@ -168,7 +165,9 @@ def calculate_efficiency_with_tool_calls(ground_truth_data: List[Dict],
         "total_questions": len(gt_dict),
         "evaluated_questions": 0,
         "efficiency_scores": [],
-        "average_efficiency": 0.0,
+        "cumulative_efficiency_scores": [],
+        "average_efficiency": None,
+        "cumulative_tool_call_ratio": None,
         "detailed_results": []
     }
 
@@ -188,21 +187,20 @@ def calculate_efficiency_with_tool_calls(ground_truth_data: List[Dict],
         results["evaluated_questions"] += 1
         model_item = model_tool_calls_data[question_index]
         model_tool_count = count_tool_calls(model_item)
+        cumulative_tool_count = len(model_item["cumulative_tool_calls"])
         
-        # Calculate efficiency ratio
         if gt_tool_count == 0:
-            efficiency = 1.0 if model_tool_count == 0 else float('inf')  # If ground truth has no tools but model has tools, efficiency is infinity
-        else:
-            # Efficiency = model tools / ground truth tools
-            # If model uses more tools to complete task, efficiency > 1
-            # If model uses fewer tools to complete task, efficiency < 1
-            efficiency = model_tool_count / gt_tool_count
-        
+            raise ValueError(f"{question_index}: cumulative call ratio requires a nonempty reference trajectory")
+        efficiency = model_tool_count / gt_tool_count
         results["efficiency_scores"].append(efficiency)
+        cumulative_efficiency = cumulative_tool_count / gt_tool_count
+        results["cumulative_efficiency_scores"].append(cumulative_efficiency)
         results["detailed_results"].append({
             "question_index": question_index,
             "gt_tool_count": gt_tool_count,
             "model_tool_count": model_tool_count,
+            "cumulative_tool_count": cumulative_tool_count,
+            "cumulative_efficiency": cumulative_efficiency,
             "efficiency": efficiency,
             "status": "evaluated"
         })
@@ -210,6 +208,8 @@ def calculate_efficiency_with_tool_calls(ground_truth_data: List[Dict],
     # Calculate average efficiency
     if results["efficiency_scores"]:
         results["average_efficiency"] = sum(results["efficiency_scores"]) / len(results["efficiency_scores"])
+        results["cumulative_tool_call_ratio"] = sum(results["cumulative_efficiency_scores"]) / len(results["cumulative_efficiency_scores"])
+    results["coverage"] = results["evaluated_questions"] / results["total_questions"]
     
     return results
 
@@ -239,6 +239,7 @@ def run_end_to_end_evaluation(ground_truth_file: str,
             "accuracy_rate": accuracy_results["accuracy"],
             "coverage": accuracy_results["coverage"],
             "average_efficiency": efficiency_results.get("average_efficiency", 0.0),
+            "cumulative_tool_call_ratio": efficiency_results.get("cumulative_tool_call_ratio"),
             "fail_rate": accuracy_results["fail_answers"] / accuracy_results["total_questions"] if accuracy_results["total_questions"] > 0 else 0.0
         }
     }
@@ -270,7 +271,8 @@ def print_evaluation_summary(results: Dict):
     if efficiency:
         print("\nEfficiency statistics:")
         print("-" * 40)
-        print(f"Average efficiency: {efficiency['average_efficiency']:.4f}")
+        print(f"Average efficiency: {efficiency['average_efficiency']}")
+        print(f"Cumulative tool-call ratio: {efficiency['cumulative_tool_call_ratio']}")
         print(f"Efficiency evaluated questions: {efficiency['evaluated_questions']}")
     
     if accuracy['missing_predictions']:
@@ -346,25 +348,19 @@ def main():
         output_file = str(output_dir / f"end_to_end_evaluation_results_round{r}.json")
 
         print("Starting end-to-end evaluation")
-        try:
-            results = run_end_to_end_evaluation(
-                ground_truth_file,
-                predicted_answers_file,
-                model_tool_calls_file,
-            )
+        results = run_end_to_end_evaluation(
+            ground_truth_file,
+            predicted_answers_file,
+            model_tool_calls_file,
+        )
 
-            print_evaluation_summary(results)
-            print_detailed_results(results)
+        print_evaluation_summary(results)
+        print_detailed_results(results)
 
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(results, f, ensure_ascii=False, indent=2)
+        with open(output_file, 'w', encoding='utf-8') as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
 
-            print(f"\nDetailed evaluation results saved to: {output_file}")
-        except Exception as e:
-            print(f"Error during evaluation: {str(e)}")
-            import traceback
-            traceback.print_exc()
-            return None
+        print(f"\nDetailed evaluation results saved to: {output_file}")
 
 if __name__ == "__main__":
     main()

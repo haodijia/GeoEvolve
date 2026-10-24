@@ -18,6 +18,7 @@ from rsmem.prompt import (
 )
 from rsmem.strategies import register_reflection
 from rsmem.experience import parse_and_validate_reflection, parse_and_validate_summary
+from rsmem.tokens import message_token_usage
 
 
 def _build_llm_messages(prompt: str) -> list:
@@ -44,26 +45,6 @@ def _build_system_user_messages(system_prompt: str, user_prompt: str) -> list:
             SimpleNamespace(type="human", content=user_prompt),
         ]
 
-
-def _extract_token_usage(response: Any) -> dict[str, int]:
-    tu = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    if hasattr(response, "usage_metadata") and response.usage_metadata:
-        um = response.usage_metadata
-        if hasattr(um, "input_tokens"):
-            tu["prompt_tokens"] = um.input_tokens
-            tu["completion_tokens"] = um.output_tokens
-            tu["total_tokens"] = um.input_tokens + um.output_tokens
-        elif hasattr(um, "prompt_tokens"):
-            tu["prompt_tokens"] = um.prompt_tokens
-            tu["completion_tokens"] = um.completion_tokens
-            tu["total_tokens"] = um.total_tokens
-        elif isinstance(um, dict):
-            tu["prompt_tokens"] = um.get("input_tokens", um.get("prompt_tokens", 0))
-            tu["completion_tokens"] = um.get("output_tokens", um.get("completion_tokens", 0))
-            tu["total_tokens"] = um.get("total_tokens", 0)
-    if tu["total_tokens"] == 0 and (tu["prompt_tokens"] > 0 or tu["completion_tokens"] > 0):
-        tu["total_tokens"] = tu["prompt_tokens"] + tu["completion_tokens"]
-    return tu
 
 
 def _parse_reflection_json(text: str) -> Optional[dict]:
@@ -110,10 +91,11 @@ async def reflect_default(
         retrieved_context=retrieved_context[:500] if retrieved_context else "(No retrieved context)",
         trajectory_json=trajectory_json,
     )
+    token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     for retry in range(max_retries):
         try:
             response = await llm.ainvoke(_build_llm_messages(prompt))
-            token_usage = _extract_token_usage(response)
+            token_usage = _add_token_usage(token_usage, message_token_usage(response))
             data = _parse_reflection_json(response.content.strip())
             if data:
                 data["token_usage"] = token_usage
@@ -186,14 +168,16 @@ async def _invoke_validated(
 ) -> tuple[Any, str, dict[str, int], int]:
     prompt = user_prompt
     last_error: Exception | None = None
+    token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
     for format_attempt in range(1, 3):
         response = await llm.ainvoke(_build_system_user_messages(system_prompt, prompt))
+        token_usage = _add_token_usage(token_usage, message_token_usage(response))
         raw = str(response.content or "").strip()
         if not raw:
             last_error = ValueError("model returned empty content")
         else:
             try:
-                return parser(raw), raw, _extract_token_usage(response), format_attempt
+                return parser(raw), raw, token_usage, format_attempt
             except Exception as exc:
                 last_error = exc
         if format_attempt == 1:

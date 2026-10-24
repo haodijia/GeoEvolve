@@ -307,6 +307,12 @@ def seed_resume_files(
         if jsonl.exists() and not dst_jsonl.exists():
             shutil.copy2(jsonl, dst_jsonl)
 
+    for k in range(1, through_attempt):
+        relative = Path("feedback") / f"attempt_{k}" / "model_usage.jsonl"
+        if (src / relative).exists():
+            (dst / relative).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(src / relative, dst / relative)
+
     # Carry over already-computed eval artefacts for rounds 1..n (verbatim).
     # Older sources may not have these — skip whatever is missing.
     for k in range(1, through_attempt + 1):
@@ -528,6 +534,10 @@ def load_attempts_through(
     drives the next attempt.
     """
     base = Path(resume_dir)
+    from rsmem.config import ExperimentConfig
+    from rsmem.tokens import TOKEN_FIELDS, sum_usage_ledger
+
+    source_config = ExperimentConfig.from_yaml(base / "experiment_config.yaml")
     loaded_attempts: List[dict] = []
 
     for k in range(1, n + 1):
@@ -552,11 +562,16 @@ def load_attempts_through(
             "results": results,
             "failed_ids": failed_ids_k,
             "token_usage": {
-                "prompt_tokens": 0,
-                "completion_tokens": 0,
-                "total_tokens": 0,
+                key: sum(result["token_usage"][key] for result in results)
+                for key in TOKEN_FIELDS
             },
+            "reflection_token_usage": dict.fromkeys(TOKEN_FIELDS, 0),
         })
+        # Feedback after n is generated anew by the resumed experiment.
+        if k < n and source_config.enable_far and failed_ids_k:
+            loaded_attempts[-1]["reflection_token_usage"] = sum_usage_ledger(
+                base / "feedback" / f"attempt_{k}" / "model_usage.jsonl"
+            )
 
         # Defensive: attempt k+1's questions should be a subset of attempt k's failures
         if k >= 2:

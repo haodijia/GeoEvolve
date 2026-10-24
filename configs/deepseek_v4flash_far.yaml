@@ -9,7 +9,6 @@ repeat: 1
 max_attempts: 3
 trajectory_strategy: summary_ftro_source
 reflection_strategy: summary_ftro
-reflection_failure_policy: error
 reflection_temperature: 0.0
 compressor_model_name: deepseek-v4-pro
 reflection_model_name: deepseek-v4-pro

@@ -7,17 +7,24 @@ Captures how much accuracy is retained per unit of reflection-token overhead.
 """
 
 import argparse
+import math
 
 
 def calculate_nei(acc: float, c_refl: float, c_total: float) -> float:
     """Return NEI = acc * (1 - c_refl / c_total), rounded to 4 decimals.
 
-    acc:     accuracy value (unit is preserved in the output)
+    acc:     accuracy in [0, 1]
     c_refl:  reflection token usage/count
     c_total: total token usage/count
     """
+    if not all(math.isfinite(value) for value in (acc, c_refl, c_total)):
+        raise ValueError("Metrics must be finite")
+    if not 0 <= acc <= 1:
+        raise ValueError("acc must be in [0, 1]")
     if c_total <= 0:
         raise ValueError("c_total must be positive")
+    if not 0 <= c_refl <= c_total:
+        raise ValueError("c_refl must be in [0, c_total]")
     rho = c_refl / c_total
     return round(acc * (1 - rho), 4)
 

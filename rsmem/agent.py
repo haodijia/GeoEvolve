@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sys
 
@@ -13,6 +14,7 @@ from rsmem.evaluation import extract_answer_from_response
 from rsmem.io import save_chat_message
 from rsmem.memory import FailureAwareMemory
 from rsmem.retrieval import hybrid_retrieval
+from rsmem.tokens import message_token_usage
 
 
 _LAZY = object()
@@ -62,7 +64,9 @@ def load_config(config: ExperimentConfig, output_dir: Path | str) -> tuple[Any, 
     importable and runnable without the full perception/analysis tool stack.
     """
 
-    out_root = Path(output_dir)
+    out_root = Path(output_dir).resolve()
+    tool_output_dir = out_root / "out"
+    tool_output_dir.mkdir(parents=True, exist_ok=True)
 
     model_name = config.model_name
     base_url = config.base_url
@@ -92,12 +96,10 @@ def load_config(config: ExperimentConfig, output_dir: Path | str) -> tuple[Any, 
 
     mcp_servers: dict = {}
     for server_name, server_config in raw_mcp_servers.items():
-        updated_args = []
-        for arg in server_config.get("args", []):
-            if isinstance(arg, str) and "tmp/tmp/out" in arg:
-                updated_args.append(str(out_root / "out"))
-            else:
-                updated_args.append(arg)
+        server_args = server_config["args"]
+        if "--temp_dir" in server_args:
+            raise ValueError("MCP output directories are assigned by the experiment runner")
+        updated_args = [*server_args, "--temp_dir", str(tool_output_dir)]
 
         command = server_config["command"]
         if command in ("python", "python3"):
@@ -144,74 +146,36 @@ def _log_info(logger: Any | None, *args: Any) -> None:
         info_fn(*args)
 
 
-def _normalize_token_usage(t: dict[str, int]) -> dict[str, int]:
-    if t["total_tokens"] == 0 and (
-        t["prompt_tokens"] > 0 or t["completion_tokens"] > 0
-    ):
-        t["total_tokens"] = t["prompt_tokens"] + t["completion_tokens"]
-    return t
+def extract_token_usage_from_response(response: dict) -> dict[str, int]:
+    totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
+    for message in response["messages"]:
+        if message.type != "ai":
+            continue
+        usage = message_token_usage(message)
+        for key in totals:
+            totals[key] += usage[key]
+    return totals
 
 
-def extract_token_usage_from_response(response: Any) -> dict[str, int]:
-    token_usage = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-
-    if hasattr(response, "usage_metadata"):
-        um = getattr(response, "usage_metadata")
-        token_usage = {
-            "prompt_tokens": getattr(um, "prompt_tokens", 0),
-            "completion_tokens": getattr(um, "completion_tokens", 0),
-            "total_tokens": getattr(um, "total_tokens", 0),
-        }
-    elif isinstance(response, dict) and "usage_metadata" in response:
-        metadata = response["usage_metadata"]
-        if isinstance(metadata, dict):
-            token_usage = {
-                "prompt_tokens": metadata.get("prompt_tokens", 0),
-                "completion_tokens": metadata.get("completion_tokens", 0),
-                "total_tokens": metadata.get("total_tokens", 0),
-            }
-    else:
-        msgs = response.get("messages", []) if isinstance(response, dict) else []
-        for message in msgs:
-            if hasattr(message, "type") and getattr(message, "type", None) == "ai":
-                rm = getattr(message, "response_metadata", None)
-                if isinstance(rm, dict) and (
-                    "token_usage" in rm or "usage_metadata" in rm
-                ):
-                    if "token_usage" in rm:
-                        tu = rm["token_usage"]
-                        token_usage["prompt_tokens"] += int(
-                            tu.get("prompt_tokens", 0)
-                        )
-                        token_usage["completion_tokens"] += int(
-                            tu.get("completion_tokens", 0)
-                        )
-                        token_usage["total_tokens"] += int(tu.get("total_tokens", 0))
-                    else:
-                        um = rm["usage_metadata"]
-                        token_usage["prompt_tokens"] += int(
-                            um.get("input_tokens", um.get("prompt_tokens", 0))
-                        )
-                        token_usage["completion_tokens"] += int(
-                            um.get("output_tokens", um.get("completion_tokens", 0))
-                        )
-                        token_usage["total_tokens"] += int(um.get("total_tokens", 0))
-                elif hasattr(message, "usage_metadata"):
-                    um = message.usage_metadata
-                    if hasattr(um, "input_tokens"):
-                        token_usage["prompt_tokens"] += int(um.input_tokens)
-                        token_usage["completion_tokens"] += int(um.output_tokens)
-                        token_usage["total_tokens"] += (
-                            int(um.input_tokens) + int(um.output_tokens)
-                        )
-                    elif hasattr(um, "prompt_tokens"):
-                        token_usage["prompt_tokens"] += int(um.prompt_tokens)
-                        token_usage["completion_tokens"] += int(
-                            um.completion_tokens
-                        )
-                        token_usage["total_tokens"] += int(um.total_tokens)
-
-    return _normalize_token_usage(token_usage)
+def extract_tool_calls_from_response(response: dict) -> list[dict]:
+    calls: list[dict] = []
+    pending: dict[str, dict] = {}
+    for message in response["messages"]:
+        if message.type == "ai":
+            for call in [*message.tool_calls, *message.invalid_tool_calls]:
+                item = {
+                    "id": call["id"],
+                    "name": call["name"],
+                    "input": call["args"],
+                    "output": None,
+                }
+                calls.append(item)
+                pending[call["id"]] = item
+        elif message.type == "tool":
+            item = pending.pop(message.tool_call_id)
+            item["output"] = message.content
+            item["status"] = message.status
+    return calls
 
 
 async def handle_question(
@@ -223,10 +187,12 @@ async def handle_question(
     kb_embeds: dict | None = None,
     emb_model=None,
     logger=None,
-) -> tuple[str, dict]:
-    """Handle a single question. Returns ``(answer, token_usage)``."""
+) -> tuple[str, dict, list[dict]]:
+    """Run one question and preserve all attempted calls, including failures."""
 
     qid_str = str(question["question_id"])
+    response = {"messages": []}
+    failure = None
 
     try:
         data_str = (
@@ -295,132 +261,69 @@ async def handle_question(
 
         from langchain_core.messages import HumanMessage
 
-        response = await agent.ainvoke(
-            {"messages": [HumanMessage(content=full_query)]},
-            config={
-                "recursion_limit": 50,
-                "max_execution_time": 300,
-            },
-        )
+        async def invoke() -> None:
+            nonlocal response
+            async for state in agent.astream(
+                {"messages": [HumanMessage(content=full_query)]},
+                config={"recursion_limit": 50},
+                stream_mode="values",
+            ):
+                response = state
 
+        await asyncio.wait_for(invoke(), timeout=300)
         final_answer = extract_answer_from_response(response)
-
-        conversation_log = []
-        for message in response.get("messages", []):
-            if not hasattr(message, "type"):
-                continue
-            mtype = message.type
-            if mtype == "human":
-                conversation_log.append({"role": "user", "content": message.content})
-            elif mtype == "ai":
-                assistant_content: list[Any] = []
-                if message.content and str(message.content).strip():
-                    assistant_content.append(
-                        {"type": "text", "content": message.content}
-                    )
-                aks = getattr(message, "additional_kwargs", None) or {}
-                tool_calls = aks.get("tool_calls") if isinstance(aks, dict) else None
-                if tool_calls:
-                    for tool_call in tool_calls:
-                        try:
-                            arguments = json.loads(tool_call["function"]["arguments"])
-                        except Exception:
-                            arguments = tool_call["function"]["arguments"]
-                        assistant_content.append(
-                            {
-                                "name": tool_call["function"]["name"],
-                                "input": arguments,
-                            }
-                        )
-                if assistant_content:
-                    conversation_log.append(
-                        {"role": "assistant", "content": assistant_content}
-                    )
-            elif mtype == "tool":
-                conversation_log.append(
-                    {
-                        "role": "tool",
-                        "name": message.name,
-                        "content": [{"output": [{"text": str(message.content)}]}],
-                    }
-                )
-
-        for message in response.get("messages", []):
-            if not hasattr(message, "type"):
-                continue
-            mtype = message.type
-            if mtype == "human":
-                continue
-            if mtype == "ai":
-                assistant_chat_content: list[Any] = []
-                if message.content and str(message.content).strip():
-                    assistant_chat_content.append(
-                        {"type": "text", "text": message.content}
-                    )
-                aks = getattr(message, "additional_kwargs", None) or {}
-                tool_calls = aks.get("tool_calls") if isinstance(aks, dict) else None
-                if tool_calls:
-                    for tool_call in tool_calls:
-                        try:
-                            arguments = json.loads(tool_call["function"]["arguments"])
-                        except Exception:
-                            arguments = tool_call["function"]["arguments"]
-                        assistant_chat_content.append(
-                            {
-                                "type": "tool_use",
-                                "id": tool_call["id"],
-                                "name": tool_call["function"]["name"],
-                                "input": arguments,
-                            }
-                        )
-                if assistant_chat_content:
-                    save_chat_message(
-                        chat_log_path,
-                        "assistant",
-                        assistant_chat_content,
-                        qid_str,
-                        metadata=None,
-                    )
-            elif mtype == "tool":
-                save_chat_message(
-                    chat_log_path,
-                    "system",
-                    [
-                        {
-                            "type": "tool_result",
-                            "id": getattr(message, "tool_call_id", "unknown"),
-                            "output": [
-                                {
-                                    "type": "text",
-                                    "text": str(message.content),
-                                    "annotations": None,
-                                    "meta": None,
-                                }
-                            ],
-                            "name": message.name,
-                        }
-                    ],
-                    qid_str,
-                    metadata=None,
-                )
-
-        _log_info(
-            logger, "Chat Content", question["question_id"], conversation_log, final_answer
-        )
-
-        token_usage = extract_token_usage_from_response(response)
-
-        return final_answer, token_usage
-
-    except Exception as e:
-        error_msg = f"Error processing question {qid_str}: {e}"
+    except Exception as error:
+        failure = f"Error processing question {qid_str}: {type(error).__name__}: {error}"
+        final_answer = failure
         save_chat_message(
             chat_log_path,
             "system",
-            [{"type": "text", "content": error_msg}],
+            [{"type": "text", "content": failure}],
             qid_str,
             metadata={"error": True},
         )
 
-        _log_info(logger, "Error", question["question_id"], [], error_msg)
-        return f"Error: {e}", {}
+    calls = extract_tool_calls_from_response(response)
+    conversation_log = []
+    for message in response["messages"]:
+        if message.type == "human":
+            conversation_log.append({"role": "user", "content": message.content})
+        elif message.type == "ai":
+            content = []
+            if message.content:
+                content.append({"type": "text", "content": message.content})
+            for call in [*message.tool_calls, *message.invalid_tool_calls]:
+                content.append({"id": call["id"], "name": call["name"], "input": call["args"]})
+            conversation_log.append({"role": "assistant", "content": content})
+            save_chat_message(
+                chat_log_path,
+                "assistant",
+                [
+                    {"type": "text", "text": message.content},
+                    *[
+                        {"type": "tool_use", "id": call["id"], "name": call["name"], "input": call["args"]}
+                        for call in [*message.tool_calls, *message.invalid_tool_calls]
+                    ],
+                ],
+                qid_str,
+                metadata=None,
+            )
+        elif message.type == "tool":
+            conversation_log.append({
+                "role": "tool",
+                "name": message.name,
+                "tool_call_id": message.tool_call_id,
+                "content": [{"output": [{"text": str(message.content)}]}],
+            })
+            save_chat_message(
+                chat_log_path,
+                "system",
+                [{"type": "tool_result", "id": message.tool_call_id,
+                  "output": [{"type": "text", "text": str(message.content), "annotations": None, "meta": None}],
+                  "name": message.name}],
+                qid_str,
+                metadata=None,
+            )
+
+    _log_info(logger, "Error" if failure else "Chat Content", question["question_id"], conversation_log, final_answer)
+    return final_answer, extract_token_usage_from_response(response), calls

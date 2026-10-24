@@ -61,7 +61,6 @@ class ExperimentConfig:
     compressor_temperature: float = 0.0
     summary_max_step_chars: int = 6000
     summary_max_trace_chars: int = 120000
-    reflection_failure_policy: str = "fallback"
 
     def __post_init__(self) -> None:
         if self.model_name is None or (
@@ -79,17 +78,11 @@ class ExperimentConfig:
             raise ValueError("compressor_request_timeout must be positive")
         if self.summary_max_step_chars <= 0 or self.summary_max_trace_chars <= 0:
             raise ValueError("summary trajectory limits must be positive")
-        if self.reflection_failure_policy not in {"fallback", "error"}:
-            raise ValueError("reflection_failure_policy must be 'fallback' or 'error'")
         if self.reflection_strategy == "summary_ftro":
             if self.trajectory_strategy != "summary_ftro_source":
                 raise ValueError(
                     "reflection_strategy='summary_ftro' requires "
                     "trajectory_strategy='summary_ftro_source'"
-                )
-            if self.reflection_failure_policy != "error":
-                raise ValueError(
-                    "summary_ftro requires reflection_failure_policy='error'"
                 )
 
     def resolve_api_key(self) -> str:
@@ -128,7 +121,7 @@ class ExperimentConfig:
     def make_output_dir(self, timestamp: str | None = None) -> str:
         ts = timestamp
         if ts is None:
-            ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+            ts = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
         return self.output_dir_template.format(
             timestamp=ts,
             method_label=self.method_label,

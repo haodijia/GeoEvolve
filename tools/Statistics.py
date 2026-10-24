@@ -3098,7 +3098,6 @@ def grayscale_to_colormap(image_path: str, save_name: str, cmap_name: str = 'vir
     import os
     from osgeo import gdal
     import numpy as np
-    import matplotlib.cm as cm
     import cv2
     
     # Read grayscale image
@@ -3112,7 +3111,8 @@ def grayscale_to_colormap(image_path: str, save_name: str, cmap_name: str = 'vir
     norm = (gray - np.min(gray)) / (np.max(gray) - np.min(gray) + 1e-8)
 
     # Apply colormap
-    cmap = cm.get_cmap(cmap_name)
+    from matplotlib import colormaps
+    cmap = colormaps[cmap_name]
     color_img = cmap(norm)[:, :, :3]  # RGB, discard alpha
     color_img_uint8 = (color_img * 255).astype(np.uint8)
 

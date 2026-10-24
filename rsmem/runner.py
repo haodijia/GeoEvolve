@@ -120,7 +120,7 @@ async def run_single_attempt(
                 total_tokens["total_tokens"] += int(tu.get("total_tokens", 0))
             continue
 
-        answer, token_usage = await handle_question(
+        answer, token_usage, tool_calls = await handle_question(
             agent,
             question,
             chat_log_path,
@@ -145,11 +145,14 @@ async def run_single_attempt(
                 "question_id": question["question_id"],
                 "attempt": attempt_num,
                 "answer": answer,
+                "execution_error": answer.startswith(f"Error processing question {qid}:"),
                 "agent_response": answer,
                 "heuristic_issue": has_issue,
                 "heuristic_reasons": reasons,
                 "heuristic_success": not has_issue,
                 "token_usage": token_usage if token_usage else {},
+                "tool_calls": tool_calls,
+                "tool_output_dir": str((save_dir / "out").resolve()),
             }
         )
         dirty = True
@@ -177,7 +180,11 @@ async def run_experiment(
     else:
         base = Path(config.output_base_dir) if config.output_base_dir else Path.cwd()
         experiment_dir = base / config.make_output_dir()
-    experiment_dir.mkdir(parents=True, exist_ok=True)
+    if continue_from_dir:
+        if not experiment_dir.is_dir():
+            raise FileNotFoundError(experiment_dir)
+    else:
+        experiment_dir.mkdir(parents=True, exist_ok=False)
     cfg_path = experiment_dir / "experiment_config.yaml"
     config.to_yaml(cfg_path)
 
@@ -303,7 +310,7 @@ async def run_experiment(
                         artifact_dir=experiment_dir / "feedback" / f"attempt_{n}",
                     ),
                     trajectory_kwargs=_build_trajectory_kwargs(config),
-                    reflection_failure_policy=config.reflection_failure_policy,
+                    usage_path=experiment_dir / "feedback" / f"attempt_{n}" / "model_usage.jsonl",
                 )
                 attempt_results_history[-1]["reflection_token_usage"] = reflection_tokens
                 for reflection in reflections:
@@ -348,6 +355,11 @@ async def run_experiment(
                     "results": attempt_results,
                     "failed_ids": failed_ids,
                     "token_usage": attempt_tokens,
+                    "reflection_token_usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": 0,
+                        "total_tokens": 0,
+                    },
                 }
             )
 
@@ -367,7 +379,7 @@ async def run_experiment(
                         artifact_dir=experiment_dir / "feedback" / f"attempt_{attempt_num}",
                     ),
                     trajectory_kwargs=_build_trajectory_kwargs(config),
-                    reflection_failure_policy=config.reflection_failure_policy,
+                    usage_path=experiment_dir / "feedback" / f"attempt_{attempt_num}" / "model_usage.jsonl",
                 )
                 attempt_results_history[-1]["reflection_token_usage"] = reflection_tokens
                 for reflection in reflections:

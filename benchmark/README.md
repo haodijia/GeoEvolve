@@ -1,48 +1,22 @@
 # EarthBench data
 
-The benchmark data are not stored in this Git repository. From the project
-root, download the question manifest and scene files:
+Data are stored outside the repository, under `/home/dijkstra/data`:
 
 ```bash
-mkdir -p benchmark
-curl -L -o benchmark/question.json \
+uv tool run --from huggingface_hub hf download Sssunset/Earth-Bench \
+  --repo-type dataset --local-dir /home/dijkstra/data/earth_bench
+ln -s /home/dijkstra/data/earth_bench benchmark/data
+curl -L -o /home/dijkstra/data/earth_bench/question.json \
   https://raw.githubusercontent.com/opendatalab/Earth-Agent/main/benchmark/question.json
-
-pip install -U "huggingface_hub[cli]"
-hf download Sssunset/Earth-Bench \
-  --repo-type dataset \
-  --local-dir benchmark/data
-
-uv run python benchmark/reconstruct_missing_data.py
+ln -s /home/dijkstra/data/earth_bench/question.json benchmark/question.json
 ```
 
-The resulting layout must be:
+The official question manifest expects `benchmark/data/questionN`. Share these read-only data across experiments; the runner gives each experiment its own `<experiment_dir>/out` directory. There is no need to copy the whole dataset for parallel runs.
 
-```text
-benchmark/
-├── question.json
-└── data/
-    ├── question1/
-    ├── ...
-    └── question248/
-```
+## Missing q148/q149 rasters
 
-The paths embedded in `question.json` use the `benchmark/data/questionN`
-layout. Do not place the downloaded dataset under `benchmark/EarthBench`
-unless you also rewrite those paths.
+`reconstruct_missing_data.py` constructs synthetic annual Los Angeles night-light rasters with hardcoded means and hotspot counts, borrowing the grid of a released building raster. It does not recover the true imagery or spatial pattern. Never describe those files as authentic reconstructed observations.
 
-For parallel runs, create an isolated dataset copy and a matching question
-manifest:
+The local audit preserves `/home/dijkstra/data/earth_bench` unchanged. `benchmark/data` currently points to `/home/dijkstra/data/earth_bench_geoevolve_review`, an overlay of official file links plus four synthetic rasters used by q148/q149. All 248 questions can execute with this overlay, but formal results must disclose it and report these two questions separately if assessing sensitivity to missing data.
 
-```bash
-cp -rL benchmark/data benchmark/data1
-python benchmark/make_question_variant.py --version 1
-```
-
-This produces `benchmark/question1.json`, whose data paths point to
-`benchmark/data1/`. Large data directories, generated manifests, and tool
-outputs are ignored by Git.
-
-`reconstruct_missing_data.py` deterministically recreates the two annual
-Los Angeles night-light rasters referenced by questions 148 and 149 but absent
-from the published dataset. Run it once after downloading EarthBench.
+See [REPRODUCTION_REVIEW.md](../REPRODUCTION_REVIEW.md) for validation evidence and perception-cache provenance. Downloaded data, local manifests, and generated outputs are ignored by Git.

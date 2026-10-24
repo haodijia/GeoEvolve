@@ -36,20 +36,21 @@ base_url: ""
 api_key: ""
 ```
 
-MCP tool servers are configured in `configs/agent_mcp.json`. The perception server uses the checked-in offline cache, so the standard EarthBench workflow does not require a GPU or a separate inference service.
+MCP tool servers are configured in `configs/agent_mcp.json`. Each experiment writes tool outputs to its own absolute `<experiment_dir>/out` directory. The perception server strictly looks up recorded observations; its external masks must be available. See [tools/README.md](tools/README.md) for cache provenance and coverage limits.
+
+Dependencies are currently installed from requirements files; use `uv run --no-sync` with that environment. The existing lockfile does not specify the runtime tool stack. See [REPRODUCTION_REVIEW.md](REPRODUCTION_REVIEW.md) for the local audit and remaining reproduction limits.
 
 ## Running an experiment
 
 ```bash
-uv run geoevolve run --config configs/deepseek_v32_rsmem.yaml
+uv run --no-sync geoevolve run --config configs/deepseek_v32_rsmem.yaml
 ```
 
 Run the deterministic evaluation pipeline after an experiment completes:
 
 ```bash
-uv run python evaluation/run_pipeline.py \
+uv run --no-sync python evaluation/run_pipeline.py \
   --base-dir <RESULTS_DIR> \
-  --model-name deepseek-v3.2 \
   --rounds 1,2,3 \
   --result-dir-name geoevolve_results
 ```
