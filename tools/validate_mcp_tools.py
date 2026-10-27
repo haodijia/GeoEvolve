@@ -5,9 +5,9 @@ import asyncio
 import csv
 import json
 import os
-import shutil
 import sys
 from contextlib import AsyncExitStack
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -291,7 +291,31 @@ def _validate_ground_truth_files(ground_truth: list[dict]) -> None:
         raise RuntimeError("Ground-truth file-flow errors:\n" + "\n".join(failures))
 
 
+def _relocate_outputs(value: object, output_dir: Path):
+    if isinstance(value, str) and value.startswith("tmp/out/"):
+        return str(output_dir / value.removeprefix("tmp/out/"))
+    if isinstance(value, list):
+        return [_relocate_outputs(item, output_dir) for item in value]
+    if isinstance(value, dict):
+        return {key: _relocate_outputs(item, output_dir) for key, item in value.items()}
+    return value
+
+
 async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
+    work_dir.mkdir(parents=True, exist_ok=False)
+    manifest = json.loads((REPO_ROOT / "benchmark/dataset_manifest.json").read_text(encoding="utf-8"))
+    report = {
+        "dataset": manifest["dataset"], "revision": manifest["revision"],
+        "synthetic_data_questions": manifest["synthetic_data_questions"],
+        "tools": [], "questions": [], "observations": [],
+        "replay_ground_truth": replay_ground_truth, "passed": False,
+    }
+    report_path = work_dir / "validation.json"
+
+    def save_report() -> None:
+        report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2) + "\n")
+
+    save_report()
     fixtures, cache_path = _prepare_fixtures(work_dir / "fixtures")
     expected = _tool_arguments(fixtures)
     environment = dict(os.environ)
@@ -302,12 +326,8 @@ async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
         )
     environment["RSMEM_PERCEPTION_CACHE"] = str(perception_cache.resolve())
     environment["FASTMCP_LOG_LEVEL"] = "ERROR"
-    server_output_dir = (
-        REPO_ROOT / "tmp" / "out" if replay_ground_truth else work_dir / "out"
-    )
-    if replay_ground_truth and server_output_dir.exists():
-        shutil.rmtree(server_output_dir)
-    server_output_dir.mkdir(parents=True, exist_ok=True)
+    server_output_dir = work_dir / "out"
+    server_output_dir.mkdir(parents=True)
 
     failures: list[tuple[str, str]] = []
     discovered: dict[str, ClientSession] = {}
@@ -347,7 +367,8 @@ async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
                 encoding="utf-8"
             )
         )
-        _validate_ground_truth_files(ground_truth)
+        if replay_ground_truth:
+            _validate_ground_truth_files(ground_truth)
         schema_failures = []
         checked_calls = 0
         for question in ground_truth:
@@ -371,11 +392,13 @@ async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
             replay_failures = []
             replayed = 0
             for question_index, question in enumerate(ground_truth, start=1):
+                question_record = {"question_index": question["question_index"], "calls": [], "passed": False}
+                report["questions"].append(question_record)
                 for call_index, call in enumerate(question["tool_calls"], start=1):
                     replayed += 1
                     try:
                         result = await discovered[call["name"]].call_tool(
-                            call["name"], call["input"]
+                            call["name"], _relocate_outputs(call["input"], server_output_dir)
                         )
                     except Exception as error:
                         replay_failures.append(
@@ -387,6 +410,11 @@ async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
                             )
                         )
                         break
+                    question_record["calls"].append({
+                        "name": call["name"], "is_error": bool(result.isError),
+                        "result": [getattr(item, "text", repr(item)) for item in result.content],
+                    })
+                    save_report()
                     if result.isError:
                         message = " | ".join(
                             getattr(item, "text", repr(item)) for item in result.content
@@ -401,10 +429,14 @@ async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
                         )
                         break
                 else:
+                    question_record["passed"] = True
+                    save_report()
                     print(
                         f"[GT {question_index:03}/{len(ground_truth)}] "
                         f"PASS {question['question_index']}"
                     )
+            report["replay_failures"] = replay_failures
+            save_report()
             if replay_failures:
                 details = "\n".join(
                     f"- {question} call {index} {name}: {message}"
@@ -416,8 +448,35 @@ async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
                 )
             print(f"Replayed {replayed} EarthBench GT calls without tool errors")
 
+        if replay_ground_truth:
+            with (REPO_ROOT / "benchmark/model_results.csv").open(newline="", encoding="utf-8") as stream:
+                observations = list(csv.DictReader(stream, delimiter=";"))
+            import ast
+            for index, row in enumerate(observations, start=1):
+                model = row["model"]
+                paths = row["file_path"].strip()
+                name = "Strip_R_CNN" if model == "Strip-R-CNN" else model
+                if model == "ChangeOS":
+                    pre, post = paths[1:-1].split(",", 1)
+                    arguments = {"pre_image_path": pre.strip(), "post_image_path": post.strip(),
+                                 "output_path": f"cache-validation/{index}.png"}
+                else:
+                    arguments = {"input_image_path": paths}
+                    if row["text_prompt"]:
+                        arguments["text_prompt"] = row["text_prompt"]
+                    if model == "SAM2":
+                        arguments.update(bboxes=ast.literal_eval(row["bbox"]), output_path=f"cache-validation/{index}.png")
+                result = await discovered[name].call_tool(name, arguments)
+                report["observations"].append({"row": index, "model": model, "passed": not result.isError})
+                if result.isError:
+                    failures.append((f"cache row {index} {name}", str(result.content)))
+            save_report()
+            print(f"Validated {len(observations)} perception observations")
+
         for index, name in enumerate(sorted(discovered), start=1):
             result = await discovered[name].call_tool(name, expected[name])
+            report["tools"].append({"name": name, "passed": not result.isError})
+            save_report()
             if result.isError:
                 message = " | ".join(
                     getattr(item, "text", repr(item)) for item in result.content
@@ -427,6 +486,9 @@ async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
             else:
                 print(f"[{index:03}/{len(discovered)}] PASS {name}")
 
+    report["passed"] = not failures
+    save_report()
+    print(f"Report: {report_path}")
     print(f"Validated {len(discovered)} tools; failures={len(failures)}")
     for name, message in failures:
         print(f"- {name}: {message}")
@@ -437,7 +499,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(
         description="Start every MCP server once and invoke every exposed tool once."
     )
-    parser.add_argument("--work-dir", type=Path, default=REPO_ROOT / "tmp" / "mcp-validation")
+    parser.add_argument("--work-dir", type=Path, default=REPO_ROOT / "tmp" / "mcp-validation" / datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
     parser.add_argument("--replay-ground-truth", action="store_true")
     args = parser.parse_args()
     raise SystemExit(

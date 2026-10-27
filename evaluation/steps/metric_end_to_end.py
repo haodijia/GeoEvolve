@@ -8,6 +8,7 @@ import re
 import argparse
 from pathlib import Path
 from typing import Dict, List, Any
+from earthbench_paths import benchmark_protocol
 
 def load_json_data(file_path: str) -> Any:
     """Load JSON or JSONL file data"""
@@ -46,25 +47,16 @@ def calculate_accuracy(ground_truth_data: List[Dict], predicted_data: Any) -> Di
             key = f"question{key}"
         gt_dict[key] = item
 
-    # Create index mapping for predicted data
+    if not isinstance(predicted_data, list):
+        raise TypeError("Predictions must be a list of structured result records")
     pred_dict = {}
-    if isinstance(predicted_data, list):
-        # Handle JSONL or List format
-        for item in predicted_data:
-            # Try to get ID from question_id or question_index
-            raw_id = item.get("question_id") or item.get("question_index")
-            if raw_id is not None:
-                key = str(raw_id)
-                if key.isdigit():
-                    key = f"question{key}"
-                pred_dict[key] = item
-    elif isinstance(predicted_data, dict):
-        # Handle Dictionary format (old format)
-        for k, v in predicted_data.items():
-            key = str(k)
-            if key.isdigit():
-                key = f"question{key}"
-            pred_dict[key] = v
+    for item in predicted_data:
+        key = str(item["question_id"])
+        if key.isdigit():
+            key = f"question{key}"
+        if key in pred_dict or key not in gt_dict:
+            raise ValueError(f"Duplicate or unknown question ID: {key}")
+        pred_dict[key] = item
 
     results = {
         "total_questions": len(gt_dict),
@@ -231,7 +223,31 @@ def run_end_to_end_evaluation(ground_truth_file: str,
         print("Calculating efficiency")
         efficiency_results = calculate_efficiency_with_tool_calls(ground_truth_data, model_tool_calls_data)
     
+    protocol = benchmark_protocol()
+    synthetic = {f"question{number}" for number in protocol["synthetic_data_questions"]}
+    by_data_source = {}
+    groups = {
+        "released_imagery": [q for q in ground_truth_data if q["question_index"] not in synthetic],
+        "synthetic_rasters": [q for q in ground_truth_data if q["question_index"] in synthetic],
+    }
+    for label, subset in groups.items():
+        ids = {q["question_index"] for q in subset}
+        predictions = []
+        for prediction in predicted_data:
+            key = str(prediction["question_id"])
+            if key.isdigit():
+                key = f"question{key}"
+            if key in ids:
+                predictions.append(prediction)
+        group = calculate_accuracy(subset, predictions)
+        by_data_source[label] = {
+            key: group[key] for key in (
+                "total_questions", "evaluated_questions", "correct_answers", "accuracy", "coverage"
+            )
+        }
     return {
+        "protocol": protocol,
+        "by_data_source": by_data_source,
         "accuracy": accuracy_results,
         "efficiency": efficiency_results,
         "summary": {

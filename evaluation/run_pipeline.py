@@ -12,11 +12,14 @@ python evaluation/run_pipeline.py \
 """
 import argparse
 import json
+import hashlib
 import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import List
+
+from steps.earthbench_paths import benchmark_protocol
 
 
 @dataclass
@@ -30,17 +33,22 @@ def _exists_all(paths: List[Path]) -> bool:
     return all(p.exists() and p.stat().st_size > 0 for p in paths)
 
 
-def _filter_existing_rounds_by_attempt_files(base_dir: Path, rounds: List[int]) -> List[int]:
-    """Keep rounds whose results_attempt_{r}.jsonl exists and is non-empty.
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
 
-    ROUND1 requires attempt_1; ROUND r requires attempt_r.
-    """
-    kept: List[int] = []
-    for r in rounds:
-        attempt_path = base_dir / f"results_attempt_{r}.jsonl"
-        if attempt_path.exists() and attempt_path.stat().st_size > 0:
-            kept.append(r)
-    return kept
+
+def _input_signature(base_dir: Path, rounds: List[int], here: Path) -> str:
+    inputs = [base_dir / f"results_attempt_{attempt}.jsonl" for attempt in range(1, max(rounds) + 1)]
+    inputs += sorted(here.rglob("*.py"))
+    inputs += [here / "extracted_tool_calls_GT.json", here.parent / "benchmark/dataset_manifest.json", here.parent / "uv.lock"]
+    payload = {str(path.resolve()): _sha256(path) for path in inputs}
+    payload["rounds"] = rounds
+    payload["protocol"] = benchmark_protocol()
+    return hashlib.sha256(json.dumps(payload, sort_keys=True).encode()).hexdigest()
 
 
 def _run(cmd: List[str]) -> None:
@@ -51,10 +59,7 @@ def _run(cmd: List[str]) -> None:
 def _load_state(path: Path) -> dict:
     if not path.exists():
         return {}
-    try:
-        return json.loads(path.read_text(encoding="utf-8"))
-    except Exception:
-        return {}
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 def _save_state(path: Path, state: dict) -> None:
@@ -84,12 +89,7 @@ def main() -> int:
     parser.add_argument(
         "--resume",
         action="store_true",
-        help="Skip steps whose outputs already exist (default behavior).",
-    )
-    parser.add_argument(
-        "--force",
-        action="store_true",
-        help="Re-run all steps even if outputs exist.",
+        help="Reuse outputs only when recorded input, evaluator, and output checksums match.",
     )
     parser.add_argument(
         "--start-from",
@@ -103,45 +103,30 @@ def main() -> int:
         help="Path to a JSON state file for resume info. Default: {results_dir}/pipeline_state.json",
     )
 
-    parser.add_argument(
-        "--strict-rounds",
-        action="store_true",
-        help="If set, fail when any requested round is missing required input files.",
-    )
-
     args = parser.parse_args()
 
-    base_dir = Path(args.base_dir)
+    base_dir = Path(args.base_dir).resolve()
 
     here = Path(__file__).resolve().parent
     results_dir = here / "results" / args.result_dir_name
     results_dir.mkdir(parents=True, exist_ok=True)
 
     requested_rounds = [int(x.strip()) for x in str(args.rounds).split(",") if x.strip()]
-    requested_rounds = sorted(set(r for r in requested_rounds if r >= 1))
+    if any(r < 1 for r in requested_rounds):
+        parser.error("rounds must be positive integers")
+    requested_rounds = sorted(set(requested_rounds))
     if not requested_rounds:
         print("Error: no valid rounds provided")
         return 2
 
-    # Filter rounds based on existence of results_attempt_{r}.jsonl.
-    # This prevents failures when users pass 1..5 but only 1..3 exist in base_dir.
-    effective_rounds = _filter_existing_rounds_by_attempt_files(base_dir, requested_rounds)
-    missing_rounds = [r for r in requested_rounds if r not in effective_rounds]
-    if missing_rounds:
-        msg = (
-            "Warning: missing or empty attempt files for rounds: "
-            + ",".join(str(r) for r in missing_rounds)
-            + ". Will skip these rounds."
-        )
-        if args.strict_rounds:
-            print(msg.replace("Will skip these rounds", "Strict mode enabled; failing"))
-            return 3
-        print(msg)
-
-    rounds = effective_rounds
-    if not rounds:
-        print("Error: no effective rounds to run (all requested rounds missing attempt files)")
+    missing = [base_dir / f"results_attempt_{r}.jsonl" for r in range(1, max(requested_rounds) + 1)
+               if not (base_dir / f"results_attempt_{r}.jsonl").is_file()
+               or (base_dir / f"results_attempt_{r}.jsonl").stat().st_size == 0]
+    if missing:
+        print("Error: missing or empty required attempt files: " + ", ".join(str(path) for path in missing))
         return 3
+    rounds = requested_rounds
+    signature = _input_signature(base_dir, rounds, here)
 
     state_file = Path(args.state_file) if args.state_file else (results_dir / "pipeline_state.json")
     state = _load_state(state_file)
@@ -224,9 +209,11 @@ def main() -> int:
 
     for step in steps:
         already_done = _exists_all(step.outputs)
-        if already_done and (args.resume or not args.force):
+        previous = state.get(step.name, {})
+        checksums = {str(path): _sha256(path) for path in step.outputs} if already_done else {}
+        if args.resume and already_done and previous.get("input_signature") == signature and previous.get("output_checksums") == checksums:
             print(f"[SKIP] {step.name}: outputs already exist")
-            state[step.name] = {"status": "skipped", "outputs": [str(p) for p in step.outputs]}
+            state[step.name]["status"] = "reused"
             _save_state(state_file, state)
             continue
 
@@ -245,7 +232,11 @@ def main() -> int:
             print(f"[FAIL] {step.name}: outputs missing or empty")
             return 3
 
-        state[step.name] = {"status": "done", "outputs": [str(p) for p in step.outputs]}
+        state[step.name] = {
+            "status": "done", "outputs": [str(p) for p in step.outputs],
+            "input_signature": signature,
+            "output_checksums": {str(path): _sha256(path) for path in step.outputs},
+        }
         _save_state(state_file, state)
         print(f"[OK] {step.name}")
 

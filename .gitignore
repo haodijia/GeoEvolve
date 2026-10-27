@@ -71,3 +71,6 @@ paper_latex/
 tests/
 
 THIRD_PARTY_AUDIT.md
+
+# Pinned benchmark download snapshot
+benchmark/.earthbench/

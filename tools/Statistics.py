@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from fastmcp import FastMCP
 
-from utils import read_image, read_image_uint8
+from utils import read_image, read_image_uint8, write_image
 
 import sys as _sys
 import functools as _functools
@@ -775,61 +775,19 @@ def calc_single_image_hotspot_tif(file_path: str, threshold: float, output_path:
     Returns:
         str: Path to the saved GeoTIFF image containing the binary map.
     """
-    # Read the original image with GDAL to preserve georeference
-    import os
     import numpy as np
-    from osgeo import gdal
-    
-    ds = gdal.Open(file_path)
-    if ds is None:
-        raise RuntimeError(f"Failed to open image: {file_path}")
-    
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
+
+    image = read_image_uint8(file_path) if uint8 else read_image(file_path)
+    if image.ndim != 2:
+        raise ValueError("hotspot maps require a single-band raster")
+    if image.size == 0:
         raise ValueError("Input image is empty")
-    
-    # Handle infinite values
-    img = np.where(np.isinf(img), np.nan, img)
-    
-    # Create binary mask: 1 for pixels below threshold, 0 for above threshold
-    # NaN values will remain as NaN
-    mask = np.zeros_like(img, dtype=np.float32)
-    mask[img < threshold] = 1.0  # Below threshold = 1
-    mask[img >= threshold] = 0.0  # Above threshold = 0
-    mask[np.isnan(img)] = np.nan  # Keep NaN as NaN
-    
-    # Generate output filename
+    image = np.where(np.isinf(image), np.nan, image)
+    mask = (image < threshold).astype(np.float32)
+    mask[np.isnan(image)] = np.nan
     output_path = TEMP_DIR / output_path
-    os.makedirs(output_path.parent, exist_ok=True)
-    
-    # Save as GeoTIFF
-    driver = gdal.GetDriverByName("GTiff")
-    out_ds = driver.Create(
-        str(output_path),
-        xsize=mask.shape[1],
-        ysize=mask.shape[0],
-        bands=1,
-        eType=gdal.GDT_Float32
-    )
-    out_ds.GetRasterBand(1).WriteArray(mask)
-    
-    # Set NoData value for NaN pixels
-    out_ds.GetRasterBand(1).SetNoDataValue(np.nan)
-    
-    # Copy georeference if available
-    if ds.GetGeoTransform():
-        out_ds.SetGeoTransform(ds.GetGeoTransform())
-    if ds.GetProjection():
-        out_ds.SetProjection(ds.GetProjection())
-    
-    out_ds.FlushCache()
-    out_ds = None
-    ds = None
-    
-    return f'Result save at {TEMP_DIR / output_path}'
+    write_image(output_path, mask, file_path, dtype="float32", nodata=np.nan)
+    return f"Result save at {output_path}"
 
 
 @mcp.tool(description='''
@@ -2808,86 +2766,27 @@ def calculate_tif_average(file_list: list[str], output_path: str, uint8: bool = 
     Returns:
         output_path (str): Full path of output file.
     """
-    import os
-    from osgeo import gdal
     import numpy as np
-    
-    # Get output directory from first file
-    output_path = TEMP_DIR / output_path
-    os.makedirs(output_path.parent, exist_ok=True)
-    
-    # Read first file to get basic info
-    ds = gdal.Open(file_list[0])
-    bands = ds.RasterCount
-    rows = ds.RasterYSize
-    cols = ds.RasterXSize
-    geotransform = ds.GetGeoTransform()
-    projection = ds.GetProjection()
-    
-    # Read first image
-    if bands == 1:
-        first_img = ds.GetRasterBand(1).ReadAsArray()
-    else:
-        first_img = np.stack([ds.GetRasterBand(i + 1).ReadAsArray() for i in range(bands)], axis=0)
-        first_img = np.transpose(first_img, (1, 2, 0))
-    ds = None
-    
-    # Initialize accumulator
-    sum_img = np.zeros_like(first_img, dtype=np.float64)
-    count = len(file_list)
-    
-    # Add first image
-    sum_img = sum_img + first_img
-    
-    # Read and accumulate remaining images
+
+    if not file_list:
+        raise ValueError("file_list must not be empty")
+    average = read_image(file_list[0]).astype(np.float64)
     for file_path in file_list[1:]:
-        ds = gdal.Open(file_path)
-        if bands == 1:
-            img = ds.GetRasterBand(1).ReadAsArray()
-        else:
-            img = np.stack([ds.GetRasterBand(i + 1).ReadAsArray() for i in range(bands)], axis=0)
-            img = np.transpose(img, (1, 2, 0))
-        ds = None
-        sum_img = sum_img + img
-    
-    # Calculate average
-    avg_img = sum_img / count
-    
-    # Convert to uint8 if needed
+        image = read_image(file_path)
+        if image.shape != average.shape:
+            raise ValueError("all images must have the same dimensions and band count")
+        average += image
+    average /= len(file_list)
     if uint8:
-        if len(avg_img.shape) == 2:
-            min_val = np.min(avg_img)
-            max_val = np.max(avg_img)
-            avg_img = (avg_img - min_val) / (max_val - min_val) * 255
-            avg_img = avg_img.astype(np.uint8)
-        else:
-            for band in range(avg_img.shape[2]):
-                band_data = avg_img[:, :, band]
-                min_val = np.min(band_data)
-                max_val = np.max(band_data)
-                band_data = (band_data - min_val) / (max_val - min_val) * 255
-                avg_img[:, :, band] = band_data.astype(np.uint8)
-    
-    # Save result
-    driver = gdal.GetDriverByName('GTiff')
-    data_type = gdal.GDT_Byte if uint8 else gdal.GDT_Float32
-    
-    if len(avg_img.shape) == 2:
-        # Single band
-        out_ds = driver.Create(output_path, cols, rows, 1, data_type)
-        out_ds.SetGeoTransform(geotransform)
-        out_ds.SetProjection(projection)
-        out_ds.GetRasterBand(1).WriteArray(avg_img)
-    else:
-        # Multi band
-        out_ds = driver.Create(output_path, cols, rows, bands, data_type)
-        out_ds.SetGeoTransform(geotransform)
-        out_ds.SetProjection(projection)
-        for i in range(bands):
-            out_ds.GetRasterBand(i + 1).WriteArray(avg_img[:, :, i])
-    
-    out_ds = None
-    return f'Result save at {output_path}'
+        axes = (0, 1)
+        minimum = np.min(average, axis=axes, keepdims=True)
+        span = np.max(average, axis=axes, keepdims=True) - minimum
+        average = np.divide(
+            average - minimum, span, out=np.zeros_like(average), where=span > 0
+        ) * 255
+    output_path = TEMP_DIR / output_path
+    write_image(output_path, average, file_list[0], dtype="uint8" if uint8 else "float32")
+    return f"Result save at {output_path}"
 
 
 
@@ -2916,96 +2815,22 @@ def calculate_tif_difference(image_a_path: str, image_b_path: str, output_path: 
     Returns:
         output_path (str): Full path of output file.
     """
-    import os
-    from osgeo import gdal
     import numpy as np
-    
-    # Get output directory from first file
-    output_path = TEMP_DIR / output_path
-    os.makedirs(output_path.parent, exist_ok=True)
-    
-    # Read first image (image_a)
-    ds_a = gdal.Open(image_a_path)
-    if ds_a is None:
-        raise RuntimeError(f"Failed to open {image_a_path}")
-    
-    bands_a = ds_a.RasterCount
-    rows_a = ds_a.RasterYSize
-    cols_a = ds_a.RasterXSize
-    geotransform = ds_a.GetGeoTransform()
-    projection = ds_a.GetProjection()
-    
-    if bands_a == 1:
-        img_a = ds_a.GetRasterBand(1).ReadAsArray()
-    else:
-        img_a = np.stack([ds_a.GetRasterBand(i + 1).ReadAsArray() for i in range(bands_a)], axis=0)
-        img_a = np.transpose(img_a, (1, 2, 0))
-    ds_a = None
-    
-    # Read second image (image_b)
-    ds_b = gdal.Open(image_b_path)
-    if ds_b is None:
-        raise RuntimeError(f"Failed to open {image_b_path}")
-    
-    bands_b = ds_b.RasterCount
-    rows_b = ds_b.RasterYSize
-    cols_b = ds_b.RasterXSize
-    
-    if bands_b == 1:
-        img_b = ds_b.GetRasterBand(1).ReadAsArray()
-    else:
-        img_b = np.stack([ds_b.GetRasterBand(i + 1).ReadAsArray() for i in range(bands_b)], axis=0)
-        img_b = np.transpose(img_b, (1, 2, 0))
-    ds_b = None
-    
-    # Check if images have same dimensions
-    if rows_a != rows_b or cols_a != cols_b or bands_a != bands_b:
-        raise ValueError(f"Images must have same dimensions. Image A: {rows_a}x{cols_a}x{bands_a}, Image B: {rows_b}x{cols_b}x{bands_b}")
-    
-    # Calculate difference (image_b - image_a)
-    diff_img = img_b.astype(np.float64) - img_a.astype(np.float64)
-    
-    # Convert to uint8 if needed
+
+    image_a = read_image(image_a_path)
+    image_b = read_image(image_b_path)
+    if image_a.shape != image_b.shape:
+        raise ValueError("images must have the same dimensions and band count")
+    difference = image_b.astype(np.float64) - image_a.astype(np.float64)
     if uint8:
-        if len(diff_img.shape) == 2:
-            min_val = np.min(diff_img)
-            max_val = np.max(diff_img)
-            if max_val > min_val:
-                diff_img = (diff_img - min_val) / (max_val - min_val) * 255
-                diff_img = diff_img.astype(np.uint8)
-            else:
-                diff_img = np.zeros_like(diff_img, dtype=np.uint8)
-        else:
-            for band in range(diff_img.shape[2]):
-                band_data = diff_img[:, :, band]
-                min_val = np.min(band_data)
-                max_val = np.max(band_data)
-                if max_val > min_val:
-                    band_data = (band_data - min_val) / (max_val - min_val) * 255
-                    diff_img[:, :, band] = band_data.astype(np.uint8)
-                else:
-                    diff_img[:, :, band] = 0
-    
-    # Save result
-    driver = gdal.GetDriverByName('GTiff')
-    data_type = gdal.GDT_Byte if uint8 else gdal.GDT_Float32
-    
-    if len(diff_img.shape) == 2:
-        # Single band
-        out_ds = driver.Create(output_path, cols_a, rows_a, 1, data_type)
-        out_ds.SetGeoTransform(geotransform)
-        out_ds.SetProjection(projection)
-        out_ds.GetRasterBand(1).WriteArray(diff_img)
-    else:
-        # Multi band
-        out_ds = driver.Create(output_path, cols_a, rows_a, bands_a, data_type)
-        out_ds.SetGeoTransform(geotransform)
-        out_ds.SetProjection(projection)
-        for i in range(bands_a):
-            out_ds.GetRasterBand(i + 1).WriteArray(diff_img[:, :, i])
-    
-    out_ds = None
-    return f"Result save at {TEMP_DIR / output_path}"
+        minimum = np.min(difference, axis=(0, 1), keepdims=True)
+        span = np.max(difference, axis=(0, 1), keepdims=True) - minimum
+        difference = np.divide(
+            difference - minimum, span, out=np.zeros_like(difference), where=span > 0
+        ) * 255
+    output_path = TEMP_DIR / output_path
+    write_image(output_path, difference, image_a_path, dtype="uint8" if uint8 else "float32")
+    return f"Result save at {output_path}"
 
 
 
@@ -3095,55 +2920,25 @@ def grayscale_to_colormap(image_path: str, save_name: str, cmap_name: str = 'vir
         cmap_name (str): Name of a matplotlib colormap, e.g. 'viridis', 'RdBu', etc.
         preserve_geo (bool): If True, preserves georeferencing.
     """
-    import os
-    from osgeo import gdal
     import numpy as np
+    import rasterio
     import cv2
-    
-    # Read grayscale image
-    ds = gdal.Open(image_path)
-    if ds is None:
-        raise RuntimeError(f"Failed to open image: {image_path}")
-    gray = ds.GetRasterBand(1).ReadAsArray().astype(np.float32)
-    gray = np.nan_to_num(gray, nan=0.0)
-
-    # Normalize to 0-1
-    norm = (gray - np.min(gray)) / (np.max(gray) - np.min(gray) + 1e-8)
-
-    # Apply colormap
     from matplotlib import colormaps
-    cmap = colormaps[cmap_name]
-    color_img = cmap(norm)[:, :, :3]  # RGB, discard alpha
-    color_img_uint8 = (color_img * 255).astype(np.uint8)
 
+    with rasterio.open(image_path) as source:
+        gray = source.read(1).astype(np.float32)
+    gray = np.nan_to_num(gray, nan=0.0)
+    norm = (gray - np.min(gray)) / (np.max(gray) - np.min(gray) + 1e-8)
+    color = (colormaps[cmap_name](norm)[:, :, :3] * 255).astype(np.uint8)
     save_path = TEMP_DIR / save_name
-
     if preserve_geo:
-        # Save as RGB GeoTIFF or plain TIF
-        driver = gdal.GetDriverByName("GTiff")
-        out_ds = driver.Create(
-            os.path.splitext(save_path)[0] + '.tif',
-            xsize=color_img_uint8.shape[1],
-            ysize=color_img_uint8.shape[0],
-            bands=3,
-            eType=gdal.GDT_Byte
-        )
-        for i in range(3):
-            out_ds.GetRasterBand(i + 1).WriteArray(color_img_uint8[:, :, i])
-        
-            gt = ds.GetGeoTransform()
-            prj = ds.GetProjection()
-            if gt:
-                out_ds.SetGeoTransform(gt)
-            if prj:
-                out_ds.SetProjection(prj)
-        out_ds.FlushCache()
-        out_ds = None
+        save_path = save_path.with_suffix(".tif")
+        write_image(save_path, color, image_path, dtype="uint8")
     else:
-        # Save as PNG or JPG using OpenCV (RGB → BGR)
-        bgr_img = cv2.cvtColor(color_img_uint8, cv2.COLOR_RGB2BGR)
-        cv2.imwrite(save_path, bgr_img)
-    return f'Result save at {save_path}'
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        if not cv2.imwrite(str(save_path), cv2.cvtColor(color, cv2.COLOR_RGB2BGR)):
+            raise RuntimeError(f"Failed to write image: {save_path}")
+    return f"Result save at {save_path}"
 
 
 @mcp.tool(description="""

@@ -11,4 +11,4 @@ cd "$REPO_ROOT"
 
 CONFIG_PATH="${1:-configs/deepseek_v32_rsmem.yaml}"
 
-exec uv run geoevolve run --config "$CONFIG_PATH"
+exec uv run --locked --extra hkg geoevolve run --config "$CONFIG_PATH"

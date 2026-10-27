@@ -14,18 +14,28 @@ This repository is independently maintained and under active development. Its ar
 
 ## Installation
 
-GeoEvolve requires Python 3.10 or later.
+Use Python 3.10–3.12 and uv. The repository selects Python 3.10 by default.
 
 ```bash
 git clone https://github.com/haodijia/GeoEvolve.git
 cd GeoEvolve
-
-uv venv --python 3.10
-source .venv/bin/activate
-uv pip install -r requirements.txt
-uv pip install -e .
-uv pip install -r tools/requirements-tools.txt
+uv sync --locked
+uv run --locked python benchmark/prepare.py
+uv run --locked python tools/validate_mcp_tools.py --replay-ground-truth
 ```
+
+The default environment includes the agent runtime, Rasterio, all CPU tools, and
+the evaluator. Rasterio uses its bundled GDAL library; no separate GDAL Python
+package, system installation, or GPU perception service is needed. Required
+Rasterio, NumPy, and OpenCV wheels must be available for the selected platform.
+
+The downloader installs the pinned [EarthBench-Fixed](https://modelscope.cn/datasets/haodijia/EarthBench-Fixed)
+snapshot (about 16.6 GB), verifies every file against its SHA-256 manifest, and
+activates the dataset. Existing matching files can be reused; see
+[benchmark/README.md](benchmark/README.md).
+
+HKG additionally needs `uv sync --locked --extra hkg` and the embedding weights
+specified in [models/README.md](models/README.md). Baseline and FAR use the default environment.
 
 ## Configuration
 
@@ -38,18 +48,18 @@ api_key: ""
 
 MCP tool servers are configured in `configs/agent_mcp.json`. Each experiment writes tool outputs to its own absolute `<experiment_dir>/out` directory. The perception server strictly looks up recorded observations; its external masks must be available. See [tools/README.md](tools/README.md) for cache provenance and coverage limits.
 
-Dependencies are currently installed from requirements files; use `uv run --no-sync` with that environment. The existing lockfile does not specify the runtime tool stack. See [REPRODUCTION_REVIEW.md](REPRODUCTION_REVIEW.md) for the local audit and remaining reproduction limits.
+All Python dependencies are declared in `pyproject.toml` and pinned in `uv.lock`. Use `uv sync --locked` to reproduce the environment. See [REPRODUCTION_REVIEW.md](REPRODUCTION_REVIEW.md) for the benchmark protocol and validation scope.
 
 ## Running an experiment
 
 ```bash
-uv run --no-sync geoevolve run --config configs/deepseek_v32_rsmem.yaml
+uv run --locked --extra hkg geoevolve run --config configs/deepseek_v32_rsmem.yaml
 ```
 
 Run the deterministic evaluation pipeline after an experiment completes:
 
 ```bash
-uv run --no-sync python evaluation/run_pipeline.py \
+uv run --locked python evaluation/run_pipeline.py \
   --base-dir <RESULTS_DIR> \
   --rounds 1,2,3 \
   --result-dir-name geoevolve_results

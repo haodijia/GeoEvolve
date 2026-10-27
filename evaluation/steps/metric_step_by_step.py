@@ -6,7 +6,7 @@ import argparse
 import os
 from pathlib import Path
 from typing import Dict, List, Any, Tuple
-from earthbench_paths import normalize_tool_calls
+from earthbench_paths import normalize_tool_calls, benchmark_protocol
 
 def load_json_data(file_path: str) -> List[Dict]:
     """Load JSON file data"""
@@ -293,6 +293,8 @@ def run_step_by_step_evaluation(predicted_file: str, ground_truth_file: str) -> 
         # If the prediction data key is a pure number, convert to "questionX" format
         if key.isdigit():
             key = f"question{key}"
+        if key in pred_dict or key not in gt_dict:
+            raise ValueError(f"Duplicate or unknown question ID: {key}")
         pred_dict[key] = item
     
     all_results = {}
@@ -339,6 +341,7 @@ def run_step_by_step_evaluation(predicted_file: str, ground_truth_file: str) -> 
             metric_stats["average_score"] = 0
     
     return {
+        "protocol": benchmark_protocol(),
         "individual_results": all_results,
         "summary": summary_stats
     }

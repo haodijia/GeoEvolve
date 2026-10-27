@@ -8,8 +8,8 @@ from rsmem.runner import run_experiment
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="rsmem",
-        description="RSMeM",
+        prog="geoevolve",
+        description="GeoEvolve",
     )
     subparsers = parser.add_subparsers(dest="command")
 

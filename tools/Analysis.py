@@ -2,7 +2,7 @@ import argparse
 
 from pathlib import Path
 from fastmcp import FastMCP
-from utils import read_image, read_image_uint8
+from utils import read_image, read_image_uint8, write_image
 
 
 import sys as _sys
@@ -538,14 +538,12 @@ def getis_ord_gi_star(image_path: str, weight_matrix: list, output_path: str) ->
         'Result save at outputs/gi_star_ndvi.tif'
     """
     import numpy as np
-    from osgeo import gdal
+    import rasterio
     from scipy.ndimage import convolve
     
     
-    ds = gdal.Open(image_path)
-    if ds is None:
-        raise RuntimeError(f"Failed to open image: {image_path}")
-    img = ds.GetRasterBand(1).ReadAsArray().astype(np.float64)
+    with rasterio.open(image_path) as source:
+        img = source.read(1).astype(np.float64)
 
     # Handle nodata
     img[np.isnan(img)] = 0
@@ -573,26 +571,7 @@ def getis_ord_gi_star(image_path: str, weight_matrix: list, output_path: str) ->
     gi_star = (numerator - x_bar * W_sum) / denominator
 
 
-    (TEMP_DIR / output_path).parent.mkdir(parents=True, exist_ok=True)
-    # Save as float32 TIFF without georeference
-    driver = gdal.GetDriverByName("GTiff")
-    out_ds = driver.Create(
-        TEMP_DIR / output_path,
-        xsize=gi_star.shape[1],
-        ysize=gi_star.shape[0],
-        bands=1,
-        eType=gdal.GDT_Float32
-    )
-    out_ds.GetRasterBand(1).WriteArray(gi_star.astype(np.float32))
-
-    # Copy georeference if available
-    if ds.GetGeoTransform():
-        out_ds.SetGeoTransform(ds.GetGeoTransform())
-    if ds.GetProjection():
-        out_ds.SetProjection(ds.GetProjection())
-
-    out_ds.FlushCache()
-    out_ds = None
+    write_image(TEMP_DIR / output_path, gi_star, image_path, dtype="float32")
 
     return f'Result save at {TEMP_DIR / output_path}'
 

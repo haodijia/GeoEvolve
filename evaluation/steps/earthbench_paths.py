@@ -1,6 +1,10 @@
 """Normalize storage roots without changing tool parameters or artifact names."""
 
 from pathlib import Path, PurePosixPath
+import hashlib
+import json
+from importlib.metadata import version
+import platform
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
@@ -30,3 +34,17 @@ def normalize_tool_calls(calls: list[dict], output_roots: list[str]) -> list[dic
         return value
 
     return [{**call, "input": normalize(call["input"], "input")} for call in calls]
+
+
+def benchmark_protocol() -> dict:
+    manifest = json.loads((REPO_ROOT / "benchmark/dataset_manifest.json").read_text(encoding="utf-8"))
+    return {
+        "dataset": manifest["dataset"], "revision": manifest["revision"],
+        "synthetic_data_questions": manifest["synthetic_data_questions"],
+        "questions": manifest["questions"],
+        "python_version": platform.python_version(),
+        "package_versions": {name: version(name) for name in ("rasterio", "numpy", "fastmcp", "mcp")},
+        "environment_lock_sha256": hashlib.sha256((REPO_ROOT / "uv.lock").read_bytes()).hexdigest(),
+        "ground_truth_sha256": hashlib.sha256((REPO_ROOT / "evaluation/extracted_tool_calls_GT.json").read_bytes()).hexdigest(),
+        "observation_cache_sha256": hashlib.sha256((REPO_ROOT / "benchmark/model_results.csv").read_bytes()).hexdigest(),
+    }

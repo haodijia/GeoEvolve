@@ -3,15 +3,15 @@
 The deterministic pipeline uses no judge model:
 
 ```bash
-uv run --no-sync python evaluation/run_pipeline.py \
+uv run --locked python evaluation/run_pipeline.py \
   --base-dir <EXPERIMENT_DIR> \
   --rounds 1,2,3 \
-  --result-dir-name <NAME> --strict-rounds --force
+  --result-dir-name <NAME>
 ```
 
 Inputs are new runner outputs `results_attempt_N.jsonl`, including `question_id`, `attempt`, `answer`, `execution_error`, `tool_calls`, `token_usage`, and absolute `tool_output_dir`. Older logs are not parsed or guessed. Requesting only round 3 still reads attempts 1–3. A question not retried retains its latest answer and latest trajectory. Failed and pending tool calls remain in the trajectory.
 
-The pipeline writes `results_summary_ROUNDN.jsonl` and `extracted_tool_calls_roundN.json` beside the run, then metric reports under `evaluation/results/<NAME>/`. Trajectory exports contain both latest-attempt `tool_calls` and all-attempt `cumulative_tool_calls`. Use a distinct result name for each experiment. `--force` recomputes reports after an input or evaluator change.
+The pipeline writes `results_summary_ROUNDN.jsonl` and `extracted_tool_calls_roundN.json` beside the run, then metric reports under `evaluation/results/<NAME>/`. Trajectory exports contain both latest-attempt `tool_calls` and all-attempt `cumulative_tool_calls`. Use a distinct result name for each experiment. Reports are recomputed by default. `--resume` reuses a step only when its recorded input, evaluator, lockfile, and output checksums match. Missing or empty required attempt files raise an error; requested rounds are never silently skipped. All attempts from 1 through the highest requested round are required.
 
 ## Main metrics
 
@@ -47,10 +47,10 @@ Answers must use the final `<Answer>value<Answer>` pair (`</Answer>` is also acc
 `build_ground_truth.py` takes answers from the official `evaluation[0].gt_answer.whitelist`, and executable tool calls from dialogs. It repairs stale paths, parameter errors, batch alignment, and broken reference trajectories; the current repaired GT has 248 questions and 1,378 calls. Rebuild with:
 
 ```bash
-uv run --no-sync python evaluation/build_ground_truth.py
+uv run --locked python evaluation/build_ground_truth.py
 ```
 
-The repaired environment exposes 110 tools: the original 104 plus six interfaces already called by official dialogs but absent from the published MCP inventory. The repaired GT, path normalization, all-question denominator, and strict answer format define our comparison protocol. They differ from some published scripts and polished result archives. Formula agreement alone does not make our numbers directly comparable to the papers. All compared methods must use this same GT, dataset variant, observation cache, and evaluator. Disclose question148/149's synthetic replacement data and the rebuilt perception masks; see [REPRODUCTION_REVIEW.md](../REPRODUCTION_REVIEW.md).
+The repaired environment exposes 110 tools: the original 104 plus six interfaces already called by official dialogs but absent from the published MCP inventory. The repaired GT, path normalization, all-question denominator, and strict answer format define our comparison protocol. They differ from some published scripts and polished result archives. Formula agreement alone does not make our numbers directly comparable to the papers. All compared methods must use this same GT, dataset variant, observation cache, and evaluator. Reports include the pinned dataset revision, observation-cache and reference-trajectory SHA-256 checksums, and question148/149's data-source tags. End-to-end reports additionally give accuracy separately for the 246 questions using released imagery and the two using synthetic rasters. The main accuracy denominator remains all 248 questions. See [REPRODUCTION_REVIEW.md](../REPRODUCTION_REVIEW.md).
 
 ## Token and reflection cost
 
@@ -59,7 +59,7 @@ The repaired environment exposes 110 tools: the original 104 plus six interfaces
 To compare round 1 and round 3:
 
 ```bash
-uv run --no-sync python evaluation/steps/metric_token_efficiency.py \
+uv run --locked python evaluation/steps/metric_token_efficiency.py \
   --summary-file <EXPERIMENT_DIR>/experiment_summary.json \
   --round-before 1 --round-after 3 \
   --acc-before <ROUND1_ACCURACY> --acc-after <ROUND3_ACCURACY>
@@ -68,3 +68,15 @@ uv run --no-sync python evaluation/steps/metric_token_efficiency.py \
 Round N cost includes actor responses from attempts 1–N, plus reflection/compressor responses generated after attempts 1–N−1. Feedback generated after N serves a later round and is excluded. Count every model role when imposing a common budget; a common actor model alone does not equalize teacher/compressor cost. These are provider-reported response tokens, not a monetary invoice; a request without reported usage makes cost unknown and raises an error.
 
 The token script computes cumulative totals, `eta = accuracy / log10(tokens)`, and `RCBR = accuracy_gain / (reflection_tokens / total_tokens)`. RCBR is `null` when reflection cost is zero. The old before/after aggregated-answer token subtraction has been removed. `metric_experience_density.py` computes `NEI = accuracy * (1 - reflection_tokens / total_tokens)` from these measured totals; accuracy must be in [0, 1]. These are optional method diagnostics, not the primary EarthBench metrics. `run_pipeline_thinkgeo.py` is a separate evaluator with a separate input contract.
+
+## Offline validation
+
+```bash
+uv run --locked python benchmark/prepare.py --check
+uv run --locked python tools/validate_mcp_tools.py --replay-ground-truth
+```
+
+Reference replay checks execution, not model accuracy. The validator records
+per-question call results, real-cache coverage, and tool coverage in its JSON
+report. It neither substitutes reference answers for model predictions nor
+starts an LLM experiment.

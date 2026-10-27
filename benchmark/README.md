@@ -1,22 +1,44 @@
-# EarthBench data
+# EarthBench-Fixed data
 
-Data are stored outside the repository, under `/home/dijkstra/data`:
+The benchmark uses [haodijia/EarthBench-Fixed](https://modelscope.cn/datasets/haodijia/EarthBench-Fixed)
+at revision `05525260e1e0f99d8e8ddd5e204cc2b975eb7c4a`. The version and SHA-256 of all
+13,699 published files are pinned in `dataset_manifest.json`.
 
 ```bash
-uv tool run --from huggingface_hub hf download Sssunset/Earth-Bench \
-  --repo-type dataset --local-dir /home/dijkstra/data/earth_bench
-ln -s /home/dijkstra/data/earth_bench benchmark/data
-curl -L -o /home/dijkstra/data/earth_bench/question.json \
-  https://raw.githubusercontent.com/opendatalab/Earth-Agent/main/benchmark/question.json
-ln -s /home/dijkstra/data/earth_bench/question.json benchmark/question.json
+uv sync --locked
+uv run --locked python benchmark/prepare.py
+uv run --locked python benchmark/prepare.py --check
 ```
 
-The official question manifest expects `benchmark/data/questionN`. Share these read-only data across experiments; the runner gives each experiment its own `<experiment_dir>/out` directory. There is no need to copy the whole dataset for parallel runs.
+The download is about 16.6 GB. Its default destination is
+`benchmark/.earthbench/`; use `--snapshot-dir /path/to/EarthBench-Fixed` to choose
+another disk. The script links `benchmark/data` to the verified snapshot and
+installs the question manifest and masks when absent. Existing tracked assets
+must match the pinned snapshot. No API key is required.
 
-## Missing q148/q149 rasters
+To reuse downloaded data without modifying the source:
 
-`reconstruct_missing_data.py` constructs synthetic annual Los Angeles night-light rasters with hardcoded means and hotspot counts, borrowing the grid of a released building raster. It does not recover the true imagery or spatial pattern. Never describe those files as authentic reconstructed observations.
+```bash
+uv run --locked python benchmark/prepare.py --reuse-data /path/to/existing/question-folders
+```
 
-The local audit preserves `/home/dijkstra/data/earth_bench` unchanged. `benchmark/data` currently points to `/home/dijkstra/data/earth_bench_geoevolve_review`, an overlay of official file links plus four synthetic rasters used by q148/q149. All 248 questions can execute with this overlay, but formal results must disclose it and report these two questions separately if assessing sensitivity to missing data.
+Matching files are copied after checksum verification. Missing or changed files
+are downloaded from the pinned revision. Partial downloads use `.part` files and
+are activated only after checksum verification. Rerunning the command reuses
+already verified snapshot files.
 
-See [REPRODUCTION_REVIEW.md](../REPRODUCTION_REVIEW.md) for validation evidence and perception-cache provenance. Downloaded data, local manifests, and generated outputs are ignored by Git.
+`--check` performs no downloads and verifies all 13,688 runtime assets: 13,659 data
+files, 26 masks, the question manifest, the observation CSV, and the reference
+trajectories. Its JSON report defaults to `tmp/data-validation.json`. The full
+snapshot also preserves the dataset license, source notices, and provenance.
+
+The fixed snapshot covers all 248 questions and 461 perception observations.
+Question148/149 use four synthetic annual night-light rasters with fixed summary
+statistics. Those files are part of this version's inputs; their origin is
+recorded in the manifest and evaluation reports. Three question214 SAM2 masks
+were rebuilt with SAM2.1 Hiera Small. Runtime mask paths are relative to the
+repository, so no paths from the release author's machine are needed.
+
+All methods must use this same snapshot. Input data are shared read-only;
+each experiment writes its own `<experiment_dir>/out`. The validator also uses
+an isolated output directory for each invocation.
