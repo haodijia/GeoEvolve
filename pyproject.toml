@@ -24,6 +24,7 @@ dependencies = [
     "langchain-core==0.3.75",
     "langchain-openai==0.3.32",
     "langchain-mcp-adapters==0.1.9",
+    "langsmith==0.14.13",
     "langgraph==0.6.6",
     "langgraph-prebuilt==0.6.4",
     "openai==1.99.9",

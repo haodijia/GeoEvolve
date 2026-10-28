@@ -25,6 +25,7 @@ from agent.io import (
     seed_resume_files,
 )
 from agent.tokens import TOKEN_FIELDS
+from agent.tracing import trace_run
 from benchmark.dataset import Dataset
 from plugins import create_plugins
 from plugins.base import AgentPlugin, PluginContext
@@ -112,6 +113,7 @@ async def run_single_attempt(
                     plugins,
                     plugin_lock=plugin_lock,
                     tool_output_dir=tool_output_dir,
+                    attempt=attempt,
                     logger=logger,
                 )
                 has_issue, reasons = heuristic_critic_has_issue(answer)
@@ -326,15 +328,16 @@ async def run_experiment(
     metadata["status"] = "running"
     _write_json(result_dir / "run.json", metadata)
     try:
-        await _execute_experiment(
-            config,
-            dataset,
-            questions,
-            result_dir,
-            resume_from_dir=resume_from_dir / "result" if resume_from_dir else None,
-            continue_from_dir=result_dir if continue_from_dir else None,
-            resume_through_attempt=resume_through_attempt,
-        )
+        async with trace_run(config, dataset.name, run_dir):
+            await _execute_experiment(
+                config,
+                dataset,
+                questions,
+                result_dir,
+                resume_from_dir=resume_from_dir / "result" if resume_from_dir else None,
+                continue_from_dir=result_dir if continue_from_dir else None,
+                resume_through_attempt=resume_through_attempt,
+            )
     except BaseException:
         metadata["status"] = "failed"
         _write_json(result_dir / "run.json", metadata)

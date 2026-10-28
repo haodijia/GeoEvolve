@@ -143,6 +143,7 @@ async def handle_question(
     *,
     plugin_lock: asyncio.Lock,
     tool_output_dir: Path,
+    attempt: int,
     logger=None,
 ) -> tuple[str, dict, list[dict]]:
     """Run one question and preserve all attempted calls, including failures."""
@@ -205,7 +206,15 @@ async def handle_question(
             nonlocal response
             async for state in agent.astream(
                 {"messages": [HumanMessage(content=full_query)]},
-                config={"recursion_limit": config.recursion_limit},
+                config={
+                    "recursion_limit": config.recursion_limit,
+                    "run_name": f"question{qid_str}/attempt_{attempt}",
+                    "metadata": {
+                        "question_id": qid_str,
+                        "attempt": attempt,
+                        "model_role": "actor",
+                    },
+                },
                 stream_mode="values",
             ):
                 response = state

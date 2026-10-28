@@ -12,6 +12,7 @@ from pathlib import Path
 
 from agent.config import ExperimentConfig, PluginConfig
 from agent.runner import run_experiment
+from agent.tracing import langsmith_api_key
 from benchmark.dataset import REPO_ROOT, Dataset
 from plugins import create_plugins
 
@@ -35,6 +36,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--concurrency", type=int, help="Concurrent questions per run; default: config"
     )
+    parser.add_argument(
+        "--langsmith",
+        action=argparse.BooleanOptionalAction,
+        default=None,
+        help="Upload agent traces to LangSmith; overrides config",
+    )
+    parser.add_argument("--langsmith-project", help="LangSmith tracing project name")
     parser.add_argument(
         "--plugins",
         nargs="*",
@@ -62,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
 def resolve_config(args: argparse.Namespace) -> ExperimentConfig:
     config = ExperimentConfig.from_yaml(args.config)
     updates = {}
-    for key in ("datasets", "sample", "concurrency"):
+    for key in ("datasets", "sample", "concurrency", "langsmith", "langsmith_project"):
         if getattr(args, key) is not None:
             updates[key] = getattr(args, key)
     if args.plugins is not None:
@@ -87,6 +95,10 @@ async def run_experiments(args: argparse.Namespace, config: ExperimentConfig) ->
         "plugins": [item.name for item in config.plugins],
         "max_attempts": config.max_attempts,
         "concurrency": config.concurrency,
+        "langsmith": {
+            "enabled": config.langsmith,
+            "project": config.langsmith_project,
+        },
         "datasets": [
             {
                 "name": dataset.name,
@@ -106,6 +118,8 @@ async def run_experiments(args: argparse.Namespace, config: ExperimentConfig) ->
     if args.dry_run:
         print(json.dumps(plan, ensure_ascii=False, indent=2))
         return
+    if config.langsmith:
+        langsmith_api_key()
     config.resolve_api_key()
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     runs = []

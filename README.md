@@ -93,6 +93,22 @@ bash scripts/run.sh --config <原配置> --continue-attempt <run目录>
 
 FAR 多轮反思属于显式研究设置，需要在独立配置中设置 `max_attempts > 1`。其内部迭代只影响方法执行，最终仍提交同一格式的结果包，评测无需选择轮次。
 
+## LangSmith 远程查看
+
+默认 `langsmith: false`，通过 `--langsmith` 开启，或通过 `--no-langsmith` 关闭。命令行优先于配置；关闭时，即使环境变量设置了 tracing，也不会为当前 run 上传轨迹。
+
+```bash
+export LANGSMITH_API_KEY='your-langsmith-api-key'
+bash scripts/run.sh --config configs/deepseek_v4flash_baseline.yaml \
+  --sample 10 --concurrency 4 --langsmith
+```
+
+模型 API key 仍使用 `OPENAI_API_KEY`。启用 tracing 必须提供 `LANGSMITH_API_KEY`；密钥不写入配置快照。`LANGSMITH_ENDPOINT` 可选择自己的服务地址或账户所在区域，`LANGSMITH_WORKSPACE_ID` 可选择工作空间。
+
+默认项目名为 `Earth-Bench pro max`，可通过配置的 `langsmith_project` 或 `--langsmith-project "项目名"` 修改。在 LangSmith 中按 `experiment` 元数据查找本地 run，按 `question_id`、`attempt` 和 `model_role` 区分题目、执行次数及 actor/reflector/compressor。并发题目各自有独立调用链；退出前会等待 tracing 队列发送完成。
+
+开启后，问题提示、模型响应、工具入参与返回值会发送到 LangSmith，用于远程查看调用链、耗时与错误。本地运行结果和 evaluation 仍保存在 `runs/`。接入方式见 [LangSmith 官方文档](https://docs.langchain.com/langsmith/trace-with-langgraph)。
+
 ## 配置与组件
 
 `configs/` 仅保留 DeepSeek 和 Qwen3 8B 两份 baseline 配置。通过 `--plugins` 选择组件组合，无需为每种组合维护单独配置。组件参数归各自插件管理。
@@ -105,6 +121,8 @@ api_key_env: OPENAI_API_KEY
 datasets: [earthbench]
 sample: null
 concurrency: 1
+langsmith: false
+langsmith_project: Earth-Bench pro max
 max_attempts: 1
 plugins:
   - name: hkg

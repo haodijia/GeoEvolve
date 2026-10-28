@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
 
 
@@ -46,7 +45,16 @@ class MeteredModel:
         row = {"question_id": self.question_id, "role": self.role,
                "error": "Model call did not complete"}
         try:
-            response = await self.model.ainvoke(messages)
+            response = await self.model.ainvoke(
+                messages,
+                config={
+                    "run_name": f"{self.role}/question{self.question_id}",
+                    "metadata": {
+                        "question_id": self.question_id,
+                        "model_role": self.role,
+                    },
+                },
+            )
             row["token_usage"] = message_token_usage(response)
             del row["error"]
         except Exception as error:

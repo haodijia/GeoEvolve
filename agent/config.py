@@ -70,6 +70,8 @@ class ExperimentConfig(ModelConfig):
     autoplanning: bool = True
     sample: int | None = None
     concurrency: int = 1
+    langsmith: bool = False
+    langsmith_project: str = "Earth-Bench pro max"
     max_attempts: int = 1
     sys_prompt: str = SYSTEM_PROMPT
     agent_config_path: str = "agent/mcp.json"
@@ -81,6 +83,13 @@ class ExperimentConfig(ModelConfig):
         super().__post_init__()
         if not isinstance(self.model_label, str):
             raise ValueError("model_label must be a string")
+        if type(self.langsmith) is not bool:
+            raise ValueError("langsmith must be a boolean")
+        if (
+            not isinstance(self.langsmith_project, str)
+            or not self.langsmith_project.strip()
+        ):
+            raise ValueError("langsmith_project must be a non-empty string")
         if self.model_label and not re.fullmatch(r"[a-z][a-z0-9_]*", self.model_label):
             raise ValueError(
                 "model_label must contain lowercase letters, digits and underscores"
