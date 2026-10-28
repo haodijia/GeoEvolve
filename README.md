@@ -105,7 +105,7 @@ bash scripts/run.sh --config configs/deepseek_v4flash_baseline.yaml \
 
 模型 API key 仍使用 `OPENAI_API_KEY`。启用 tracing 必须提供 `LANGSMITH_API_KEY`；密钥不写入配置快照。`LANGSMITH_ENDPOINT` 可选择自己的服务地址或账户所在区域，`LANGSMITH_WORKSPACE_ID` 可选择工作空间。
 
-默认项目名为 `Earth-Bench pro max`，可通过配置的 `langsmith_project` 或 `--langsmith-project "项目名"` 修改。在 LangSmith 中按 `experiment` 元数据查找本地 run，按 `question_id`、`attempt` 和 `model_role` 区分题目、执行次数及 actor/reflector/compressor。并发题目各自有独立调用链；退出前会等待 tracing 队列发送完成。
+每个本地 run 自动对应一个独立的 LangSmith 项目，项目名与 `runs/` 下的目录名完全相同，例如 `earthbench_deepseek_20261028_144757`。Qwen、DeepSeek 和同一模型的不同实验各自独立，选择对应项目即可查看该次实验，无需手动筛选混合列表。在项目内按 `question_id`、`attempt` 和 `model_role` 区分题目、执行次数及 actor/reflector/compressor。继续中断的 run 时沿用同名项目。并发题目各自有独立调用链；退出前会等待 tracing 队列发送完成。
 
 开启后，问题提示、模型响应、工具入参与返回值会发送到 LangSmith，用于远程查看调用链、耗时与错误。本地运行结果和 evaluation 仍保存在 `runs/`。接入方式见 [LangSmith 官方文档](https://docs.langchain.com/langsmith/trace-with-langgraph)。
 
@@ -122,7 +122,6 @@ datasets: [earthbench]
 sample: null
 concurrency: 1
 langsmith: false
-langsmith_project: Earth-Bench pro max
 max_attempts: 1
 plugins:
   - name: hkg

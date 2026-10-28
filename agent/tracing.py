@@ -29,7 +29,7 @@ async def trace_run(
         with tracing_context(
             enabled=config.langsmith,
             client=client,
-            project_name=config.langsmith_project,
+            project_name=run_dir.name,
             parent=False,
             tags=["earth-bench-pro-max", dataset_name],
             metadata={

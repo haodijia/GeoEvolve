@@ -9,7 +9,6 @@ datasets:
 sample: null
 concurrency: 1
 langsmith: false
-langsmith_project: Earth-Bench pro max
 plugins: []
 agent_config_path: agent/mcp.json
 output_base_dir: runs

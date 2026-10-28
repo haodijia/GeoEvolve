@@ -319,6 +319,7 @@ async def run_experiment(
             "dataset": dataset.name,
             "model": config.model_name,
             "plugins": [item.name for item in config.plugins],
+            "langsmith_project": run_dir.name if config.langsmith else None,
         }
         if resume_from_dir is not None:
             metadata.update(

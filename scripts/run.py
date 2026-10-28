@@ -42,7 +42,6 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Upload agent traces to LangSmith; overrides config",
     )
-    parser.add_argument("--langsmith-project", help="LangSmith tracing project name")
     parser.add_argument(
         "--plugins",
         nargs="*",
@@ -70,7 +69,7 @@ def build_parser() -> argparse.ArgumentParser:
 def resolve_config(args: argparse.Namespace) -> ExperimentConfig:
     config = ExperimentConfig.from_yaml(args.config)
     updates = {}
-    for key in ("datasets", "sample", "concurrency", "langsmith", "langsmith_project"):
+    for key in ("datasets", "sample", "concurrency", "langsmith"):
         if getattr(args, key) is not None:
             updates[key] = getattr(args, key)
     if args.plugins is not None:
@@ -89,21 +88,32 @@ async def run_experiments(args: argparse.Namespace, config: ExperimentConfig) ->
     selections = {
         dataset.name: dataset.load_questions(config.sample) for dataset in datasets
     }
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    destinations = {
+        dataset.name: (
+            args.continue_attempt.resolve()
+            if args.continue_attempt
+            else (
+                Path(config.output_base_dir) / make_run_name(config, dataset, timestamp)
+            ).resolve()
+        )
+        for dataset in datasets
+    }
     plan = {
         "project": "Earth-Bench pro max",
         "model": config.model_name,
         "plugins": [item.name for item in config.plugins],
         "max_attempts": config.max_attempts,
         "concurrency": config.concurrency,
-        "langsmith": {
-            "enabled": config.langsmith,
-            "project": config.langsmith_project,
-        },
+        "langsmith": config.langsmith,
         "datasets": [
             {
                 "name": dataset.name,
                 "questions": len(selections[dataset.name]),
                 "ground_truth": str(dataset.path("ground_truth")),
+                "langsmith_project": destinations[dataset.name].name
+                if config.langsmith
+                else None,
             }
             for dataset in datasets
         ],
@@ -121,17 +131,10 @@ async def run_experiments(args: argparse.Namespace, config: ExperimentConfig) ->
     if config.langsmith:
         langsmith_api_key()
     config.resolve_api_key()
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     runs = []
     for dataset in datasets:
         current = replace(config, datasets=[dataset.name])
-        destination = (
-            args.continue_attempt.resolve()
-            if args.continue_attempt
-            else (
-                Path(config.output_base_dir) / make_run_name(config, dataset, timestamp)
-            ).resolve()
-        )
+        destination = destinations[dataset.name]
         result = await run_experiment(
             current,
             dataset,
