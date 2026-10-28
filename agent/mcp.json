@@ -1,0 +1,24 @@
+{
+  "mcpServers": {
+    "Analysis": {
+      "command": "python",
+      "args": ["agent/tools/Analysis.py"]
+    },
+    "Index": {
+      "command": "python",
+      "args": ["agent/tools/Index.py"]
+    },
+    "Inversion": {
+      "command": "python",
+      "args": ["agent/tools/Inversion.py"]
+    },
+    "Perception": {
+      "command": "python",
+      "args": ["agent/tools/Perception.py"]
+    },
+    "Statistics": {
+      "command": "python",
+      "args": ["agent/tools/Statistics.py"]
+    }
+  }
+}

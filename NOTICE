@@ -1,4 +1,4 @@
-GeoEvolve
+Earth-Bench pro max
 =========
 
 This product includes third-party software components. Their original
@@ -10,8 +10,8 @@ RSMeM
 https://github.com/AI9Stars/RSMeM
 -------------------------------------------------------------------------------
 
-GeoEvolve began as a repaired and extended derivative of RSMeM. The original
-RSMeM copyright and MIT License notice are retained in LICENSE. GeoEvolve is
+Earth-Bench pro max began as a repaired and extended derivative of RSMeM. The original
+RSMeM copyright and MIT License notice are retained in LICENSE. Earth-Bench pro max is
 independently maintained and is not affiliated with or endorsed by the RSMeM
 authors.
 
@@ -24,11 +24,10 @@ https://github.com/opendatalab/Earth-Agent
 RSMeM was initially developed from the Earth-Agent codebase and was
 substantially refactored into a modular package. In particular, the agent
 execution, logging, experiment orchestration, and evaluation code under
-`rsmem/` derives in part from Earth-Agent's
+`agent/` and `plugins/` derives in part from Earth-Agent's
 `scripts/langchain_deepseek_autoplan.py`, while the scripts under
 `evaluation/` are adapted from Earth-Agent's `evaluate/` and `process/`
-directories. All subsequent modifications and the RSMeM-specific HKG and FAR
-components are maintained by the RSMeM authors.
+directories. The HKG and FAR components in `plugins/` derive from RSMeM.
 
 Earth-Agent is distributed under the MIT License, reproduced in full below.
 

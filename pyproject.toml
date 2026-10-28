@@ -3,9 +3,9 @@ requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "geoevolve"
-version = "0.1.0"
-description = "An evolving framework for reliable tool-using remote-sensing agents"
+name = "earth-bench-pro-max"
+version = "0.2.0"
+description = "Earth-Bench pro max: reproducible Earth-agent benchmarks with composable plugins"
 readme = "README.md"
 requires-python = ">=3.10,<3.13"
 license = { file = "LICENSE" }
@@ -21,7 +21,6 @@ classifiers = [
 
 dependencies = [
     "numpy==1.26.4",
-    "langchain==0.3.27",
     "langchain-core==0.3.75",
     "langchain-openai==0.3.32",
     "langchain-mcp-adapters==0.1.9",
@@ -37,7 +36,6 @@ dependencies = [
     "ruptures==1.1.10",
     "opencv-python==4.11.0.86",
     "scikit-image==0.25.2",
-    "scikit-learn==1.7.1",
     "scipy==1.14.1",
     "pandas==2.3.1",
     "statsmodels==0.14.5",
@@ -47,16 +45,21 @@ dependencies = [
 ]
 
 [project.scripts]
-geoevolve = "rsmem.__main__:main"
+earth-bench-pro-max = "scripts.run:main"
 
 [project.optional-dependencies]
 hkg = ["torch==2.2.0", "transformers==4.57.1"]
 
-[tool.setuptools.packages.find]
-include = ["rsmem*"]
+[tool.setuptools.package-data]
+agent = ["mcp.json", "tools/README.md"]
+scripts = ["run.sh"]
+evaluation = ["README.md", "PROTOCOL.md"]
+benchmark = ["*.lock.json", "README.md"]
+"plugins.hkg" = ["knowledge.json"]
 
-[tool.pytest.ini_options]
-testpaths = ["tests"]
+[tool.setuptools.packages.find]
+include = ["agent*", "benchmark*", "plugins*", "scripts*", "evaluation*"]
+namespaces = false
 
 [tool.uv]
 no-build-package = ["rasterio", "numpy", "opencv-python"]

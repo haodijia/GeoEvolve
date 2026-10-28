@@ -1,82 +1,131 @@
-# EarthBench evaluation
+# 评测
 
-The deterministic pipeline uses no judge model:
+所有方法提交同一种最终结果包，主入口执行“提取 → 指标计算”。评测读取最终答案、提交轨迹、累计调用与成本，不读取方法内部的执行轮次。
 
 ```bash
-uv run --locked python evaluation/run_pipeline.py \
-  --base-dir <EXPERIMENT_DIR> \
-  --rounds 1,2,3 \
-  --result-dir-name <NAME>
+uv run --locked python -m evaluation --list
+uv run --locked python -m evaluation --run runs/earthbench_deepseek_20261028_103829
+
+# 选择指标
+uv run --locked python -m evaluation \
+  --run runs/earthbench_deepseek_20261028_103829 \
+  --metrics answers trajectory tokens
+
+# 输入、代码和输出校验值均一致时复用报告
+uv run --locked python -m evaluation --run runs/earthbench_deepseek_20261028_103829 --resume
 ```
 
-Inputs are new runner outputs `results_attempt_N.jsonl`, including `question_id`, `attempt`, `answer`, `execution_error`, `tool_calls`, `token_usage`, and absolute `tool_output_dir`. Older logs are not parsed or guessed. Requesting only round 3 still reads attempts 1–3. A question not retried retains its latest answer and latest trajectory. Failed and pending tool calls remain in the trajectory.
+无需指定数据集、参考文件、结果目录或轮次。baseline 默认每题执行一次；FAR 如在研究配置中显式启用内部迭代，也提交相同的最终结果包。只有执行完成的 run 可以评测，执行失败的题目作为结果记录保留并计分。
 
-The pipeline writes `results_summary_ROUNDN.jsonl` and `extracted_tool_calls_roundN.json` beside the run, then metric reports under `evaluation/results/<NAME>/`. Trajectory exports contain both latest-attempt `tool_calls` and all-attempt `cumulative_tool_calls`. Use a distinct result name for each experiment. Reports are recomputed by default. `--resume` reuses a step only when its recorded input, evaluator, lockfile, and output checksums match. Missing or empty required attempt files raise an error; requested rounds are never silently skipped. All attempts from 1 through the highest requested round are required.
+## 目录结构
 
-## Main metrics
+```text
+runs/earthbench_deepseek_20261028_103829/
+  result/
+    run.json
+    experiment_config.yaml
+    dataset_snapshot.json
+    results.jsonl                      通用结果，每题一条
+    experiment_summary.json            通用运行汇总与实际成本
+    run.chat
+    out/                               每题结束清空
+    traces/                            内部执行记录，供审计和手动恢复
+    plugins/                           插件状态与用量账本
+  evaluation/
+    extracted/
+      answers.json
+      trajectories.json
+    metrics/
+      answers.json
+      trajectory.json
+      tokens.json
+    summary.json
+    protocol.json
+    state.json
+```
 
-All step scores are averaged over all 248 GT questions, including zeros for missing predictions. Official score formulas were checked against the published Earth-Agent evaluator on all 248 published Kimi trajectories: zero differences when using the same GT and normalized inputs.
+`traces/` 和 `plugins/` 保存方法内部细节；评测不依赖这些目录的组织方式。输入数据、题目集合和成本校验不一致时直接报错。评测不打开 actor 的临时输出文件。
 
-| Paper/display name | JSON key | Definition |
-|---|---|---|
-| Tool_Any_Order | `contains_all_tool_calls_any_order` | Fraction of distinct GT tool names present anywhere in the prediction. Repeats do not count separately. |
-| Tool_In_Order | `contains_all_tool_calls_in_order` | Matched GT tool-name subsequence prefix / GT length. Other predicted calls may occur between matches. Matching stops at the first GT tool not found later. |
-| Tool_Exact_Match | `trajectory_step_wise_score` | Matching tool-name prefix / GT length. This is the official naming; it is a fractional prefix score. |
-| Parameter | `parameter_accuracy` | Matching prefix requiring both tool name and complete input equality / GT length. Storage roots are normalized as described below. |
-| Extra diagnostic | `contains_all_tool_calls_in_order_exact_match` | Matching tool-name prefix / max(predicted length, GT length). This is not the official Tool_Exact_Match. |
+## 统一结果契约
 
-The end-to-end report contains:
+`result/results.jsonl` 每题一条记录：
 
-| Key | Definition |
+| 字段 | 含义 |
 |---|---|
-| `accuracy` | Correct answers / all 248 questions. Missing, malformed, and failed answers receive zero. |
-| `accuracy_on_evaluated` | Correct / present predictions; diagnostic only. |
-| `coverage` | Present predictions / all GT questions. |
-| `fail_rate` | Explicit execution failures or empty answers / all GT questions. |
-| `average_efficiency` | Mean latest-attempt tool-call count / GT count, over present traces. |
-| `cumulative_tool_call_ratio` | Mean all-attempt tool-call count / GT count, over present traces. |
+| `question_id` | 题目 ID，在 run 内唯一 |
+| `answer` | 最终提交的答案 |
+| `execution_error` | 最终提交是否执行失败 |
+| `tool_calls` | 产生最终答案的工具轨迹 |
+| `cumulative_tool_calls` | 为该题实际执行的全部工具调用，包括失败调用和内部迭代 |
+| `output_roots` | 轨迹中出现的输出根目录，用于参数归一化 |
+| `token_usage` | 该题累计 actor 用量，包含产生最终结果之前的内部执行 |
 
-Call ratios measure cost, not solution quality. An empty trace has ratio zero; always report accuracy and coverage alongside cost. No present traces yields `null` cost. Batch operations remain one tool call; lists are never expanded into separate per-file calls.
+`experiment_summary.json` 中的 `token_usage` 分别记录 `actor`、`plugins` 和 `total`。插件的反思、压缩和格式校正成本均计入总成本。最终准确率与最终轨迹衡量提交结果；累计调用和全部角色的用量衡量得到该结果的实际成本。
 
-Answers must use the final `<Answer>value<Answer>` pair (`</Answer>` is also accepted). No free-text letter guessing or model polishing is performed. The GT contains 246 multiple-choice answers and two numeric answers. The runner's `heuristic_success` indicates answer-format validity, not correctness, and must not be reported as benchmark accuracy.
+每种方法负责生成结果包。baseline 的内部记录只有一次执行；FAR 多次执行时保留最后一次答案和提交轨迹，累计调用及 actor 成本覆盖全部内部执行。FAR 的轮次编号只存在于内部记录中。
 
-## Paths and GT protocol
+## 代码结构与扩展
 
-`earthbench_paths.py` normalizes declared per-experiment output roots, canonical `tmp/out`, and the repository's benchmark-data root aliases. Relative output parameters are also mapped to the same artifact root. Filenames, numeric values, list order, and other parameters are preserved. Relocating all 248 GT trajectories to an isolated experiment directory preserves parameter score 1.
-
-`build_ground_truth.py` takes answers from the official `evaluation[0].gt_answer.whitelist`, and executable tool calls from dialogs. It repairs stale paths, parameter errors, batch alignment, and broken reference trajectories; the current repaired GT has 248 questions and 1,378 calls. Rebuild with:
-
-```bash
-uv run --locked python evaluation/build_ground_truth.py
+```text
+evaluation/
+  __main__.py              统一入口与流程编排
+  context.py               校验通用结果包
+  protocol.py              数据来源和路径归一化
+  extraction/
+    answers.py             提取最终答案
+    trajectories.py        提取提交与累计轨迹
+  metrics/
+    answers.py             答案、覆盖率、失败率和工具调用成本
+    trajectory.py          工具顺序、匹配和参数准确率
+    tokens.py              实际 actor/plugin token 成本
 ```
 
-The repaired environment exposes 110 tools: the original 104 plus six interfaces already called by official dialogs but absent from the published MCP inventory. The repaired GT, path normalization, all-question denominator, and strict answer format define our comparison protocol. They differ from some published scripts and polished result archives. Formula agreement alone does not make our numbers directly comparable to the papers. All compared methods must use this same GT, dataset variant, observation cache, and evaluator. Reports include the pinned dataset revision, observation-cache and reference-trajectory SHA-256 checksums, and question148/149's data-source tags. End-to-end reports additionally give accuracy separately for the 246 questions using released imagery and the two using synthetic rasters. The main accuracy denominator remains all 248 questions. See [REPRODUCTION_REVIEW.md](../REPRODUCTION_REVIEW.md).
+提取器和指标由主入口自动发现。辅助模块使用下划线开头的文件名，不参与发现。
 
-## Token and reflection cost
+新增提取器，在 `extraction/` 增加模块：
 
-`experiment_summary.json` records actor and reflection costs by attempt. Reflection and compressor responses are logged before content parsing in `feedback/attempt_N/model_usage.jsonl`, so format retries count even if their output is rejected. Resume imports earlier actor costs and feedback ledgers. Reflections no longer use fixed fallback text on failure.
-
-To compare round 1 and round 3:
-
-```bash
-uv run --locked python evaluation/steps/metric_token_efficiency.py \
-  --summary-file <EXPERIMENT_DIR>/experiment_summary.json \
-  --round-before 1 --round-after 3 \
-  --acc-before <ROUND1_ACCURACY> --acc-after <ROUND3_ACCURACY>
+```python
+def extract(records: list[dict]) -> list[dict]:
+    return [{"question_id": record["question_id"]} for record in records]
 ```
 
-Round N cost includes actor responses from attempts 1–N, plus reflection/compressor responses generated after attempts 1–N−1. Feedback generated after N serves a later round and is excluded. Count every model role when imposing a common budget; a common actor model alone does not equalize teacher/compressor cost. These are provider-reported response tokens, not a monetary invoice; a request without reported usage makes cost unknown and raises an error.
+`records` 就是通用最终结果列表。新增指标，在 `metrics/` 增加模块：
 
-The token script computes cumulative totals, `eta = accuracy / log10(tokens)`, and `RCBR = accuracy_gain / (reflection_tokens / total_tokens)`. RCBR is `null` when reflection cost is zero. The old before/after aggregated-answer token subtraction has been removed. `metric_experience_density.py` computes `NEI = accuracy * (1 - reflection_tokens / total_tokens)` from these measured totals; accuracy must be in [0, 1]. These are optional method diagnostics, not the primary EarthBench metrics. `run_pipeline_thinkgeo.py` is a separate evaluator with a separate input contract.
+```python
+from evaluation.context import MetricContext
 
-## Offline validation
+REQUIRES = ("answers",)
 
-```bash
-uv run --locked python benchmark/prepare.py --check
-uv run --locked python tools/validate_mcp_tools.py --replay-ground-truth
+
+def compute(context: MetricContext) -> dict:
+    return {"summary": {"prediction_count": len(context.extracted["answers"])}}
 ```
 
-Reference replay checks execution, not model accuracy. The validator records
-per-question call results, real-cache coverage, and tool coverage in its JSON
-report. It neither substitutes reference answers for model predictions nor
-starts an LLM experiment.
+`context.run` 提供配置、数据集、最终结果、参考答案与运行汇总。指标返回对象必须包含 `summary` 字典，其他字段可保存逐题详情。完整对象写入对应指标文件，`summary` 汇入 run 的评测汇总。新增模块后可用 `--metrics` 选择，也会加入默认的全指标评测。
+
+默认重新计算。`--resume` 仅在输入、代码、环境与全部输出校验值一致时复用报告；改变指标选择后会清理旧选择的衍生产物。
+
+## 指标口径
+
+准确率、覆盖率、失败率和轨迹得分均以本次 run 的题目集合为分母。题目 ID 与保存的数据集快照核对，参考答案和轨迹只取这一集合。跑两题，分母就是 2。
+
+| 指标 | 含义 |
+|---|---|
+| Accuracy | 正确答案 / 本次运行的问题数 |
+| Coverage | 已提交预测 / 本次运行的问题数 |
+| Fail rate | 执行失败或空答案 / 本次运行的问题数 |
+| Tool_Any_Order | 预测包含的不同参考工具名占比 |
+| Tool_In_Order | 按顺序匹配的参考工具子序列前缀占比 |
+| Tool_Exact_Match | 工具名逐步匹配的前缀长度 / 参考长度 |
+| Parameter | 工具名及完整参数逐步匹配的前缀长度 / 参考长度 |
+| Tool-call ratio | 提交轨迹或累计工具调用数 / 参考调用数 |
+
+答案使用最后一对 `<Answer>value<Answer>` 标签，也接受 `</Answer>` 闭合。格式无效和执行失败的答案计零。路径归一化保留文件名、数值和列表顺序。批量操作按一次工具调用计算。
+
+`tokens.json` 自动计算累计 actor/plugin 成本、插件占比和 `accuracy / log10(tokens)`。零 token 时占比为 `null`，总 token 不大于 1 时对数效率为 `null`。模型返回的 token 数不是货币账单。
+
+EarthBench-Fixed 的数据来源、修复规则和公式见 [PROTOCOL.md](PROTOCOL.md)。参考轨迹重建是数据集维护命令：
+
+```bash
+uv run --locked python -m benchmark.build_ground_truth
+```
