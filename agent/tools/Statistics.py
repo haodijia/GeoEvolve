@@ -1936,6 +1936,8 @@ def calc_batch_image_mean_max_min(
         Calculate the percentage or count of images whose mean pixel values 
         (in a specified band) are above or below a given threshold.
 
+    Input read or band errors abort the entire call; no partial aggregate is returned.
+
     Parameters:
         file_list (list[str]):
             List of image file paths.
@@ -1974,6 +1976,8 @@ def calc_batch_image_mean_threshold(
         Calculate the percentage or count of images whose mean pixel values 
         (in a specified band) are above or below a given threshold.
 
+    Input read or band errors abort the entire call; no partial aggregate is returned.
+
     Parameters:
         file_list (list[str]):
             List of image file paths.
@@ -2004,29 +2008,26 @@ def calc_batch_image_mean_threshold(
     valid_means = []
 
     for file_path in file_list:
-        try:
-            with rasterio.open(file_path) as src:
-                if band_index >= src.count:
-                    print(f"Warning: {file_path} does not contain band {band_index + 1}. Skipped.")
-                    continue
+        with rasterio.open(file_path) as src:
+            if not 0 <= band_index < src.count:
+                raise ValueError(
+                    f"Band index {band_index} is out of range for {file_path} "
+                    f"({src.count} bands)"
+                )
 
-                data = src.read(band_index + 1).astype(np.float32)
-                data = np.where(data == src.nodata, np.nan, data)
+            data = src.read(band_index + 1).astype(np.float32)
+            data = np.where(data == src.nodata, np.nan, data)
 
-                if uint8:
-                    dmin, dmax = np.nanmin(data), np.nanmax(data)
-                    if dmax > dmin:
-                        data = (data - dmin) / (dmax - dmin) * 255
-                    else:
-                        data[:] = 0
+            if uint8:
+                dmin, dmax = np.nanmin(data), np.nanmax(data)
+                if dmax > dmin:
+                    data = (data - dmin) / (dmax - dmin) * 255
+                else:
+                    data[:] = 0
 
-                mean_val = np.nanmean(data)
-                if not np.isnan(mean_val):
-                    valid_means.append(mean_val)
-
-        except Exception as e:
-            print(f"Error processing {file_path}: {e}")
-            continue
+            mean_val = np.nanmean(data)
+            if not np.isnan(mean_val):
+                valid_means.append(mean_val)
 
     if not valid_means:
         return 0 if return_type == "count" else 0.0
@@ -2334,6 +2335,8 @@ def count_images_exceeding_threshold_ratio(
     Calculate the average percentage of pixels exceeding a value threshold,
     considering only images where the ratio is greater than a specified ratio threshold.
 
+    Input read or band errors abort the entire call; no partial aggregate is returned.
+
     Parameters:
         image_paths (str or list):
             Path(s) to image file(s).
@@ -2372,6 +2375,8 @@ def average_ratio_exceeding_threshold(
     """
     Calculate the average percentage of pixels exceeding a value threshold,
     considering only images where the ratio is greater than a specified ratio threshold.
+
+    Input read or band errors abort the entire call; no partial aggregate is returned.
 
     Parameters:
         image_paths (str or list):
@@ -2412,16 +2417,11 @@ def average_ratio_exceeding_threshold(
     ratios = []
 
     for path in image_paths:
-        try:
-            with rasterio.open(path) as src:
-                band = src.read(1).astype(np.float32)
-                nodata = src.nodata
-                if nodata is not None:
-                    band[band == nodata] = np.nan
-        except Exception as e:
-            if verbose:
-                print(f"Error processing {path}: {e}")
-            continue
+        with rasterio.open(path) as src:
+            band = src.read(1).astype(np.float32)
+            nodata = src.nodata
+            if nodata is not None:
+                band[band == nodata] = np.nan
 
         valid_mask = ~np.isnan(band)
         total_pixels = np.sum(valid_mask)

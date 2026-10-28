@@ -135,11 +135,14 @@ def _dispatch_path_batch(tool, *, fixed: dict | None = None, **paths):
 
 
 @mcp.tool(description='''
-Compute Precipitable Water Vapor (PWV) image from local MODIS surface reflectance band files
+Batch-capable: Compute Precipitable Water Vapor (PWV) image from local MODIS surface reflectance band files
 using the band ratio method.
 
-All raster path parameters accept either one string or equally sized lists. List
-inputs are processed as one batch call and results preserve input order.
+Process one scene or multiple scenes in a single tool call.
+Use strings for one scene, or lists for a batch including output_path.
+Equal-length lists pair by position. With unequal lengths, output filenames
+must contain acquisition dates; matching input scenes are grouped by date
+and composited. Batch results follow output_path order.
 
 This method uses surface reflectance bands:
 - sur_refl_b02 (0.865 μm), sur_refl_b05 (1.240 μm): atmospheric window bands
@@ -153,15 +156,15 @@ Data Source :
         * "sur_refl_b18": 0.936 μm (H₂O absorption)
         * "sur_refl_b19": 0.940 μm (H₂O absorption)
 Parameters:
-    sur_refl_b02_path (str): File path to band sur_refl_b02 (0.865 um) GeoTIFF.
-    sur_refl_b05_path (str): File path to band sur_refl_b05 (1.240 um) GeoTIFF.
-    sur_refl_b17_path (str): File path to band sur_refl_b17 GeoTIFF.
-    sur_refl_b18_path (str): File path to band sur_refl_b18 GeoTIFF.
-    sur_refl_b19_path (str): File path to band sur_refl_b19 GeoTIFF.
-    output_path (str): relative path for the output raster file, e.g. "question17/pwv_2022-01-16.tif"
+    sur_refl_b02_path (str | list[str]): File path to band sur_refl_b02 (0.865 um) GeoTIFF.
+    sur_refl_b05_path (str | list[str]): File path to band sur_refl_b05 (1.240 um) GeoTIFF.
+    sur_refl_b17_path (str | list[str]): File path to band sur_refl_b17 GeoTIFF.
+    sur_refl_b18_path (str | list[str]): File path to band sur_refl_b18 GeoTIFF.
+    sur_refl_b19_path (str | list[str]): File path to band sur_refl_b19 GeoTIFF.
+    output_path (str | list[str]): relative path for the output raster file, e.g. "question17/pwv_2022-01-16.tif"
 
 Returns:
-    str: Path to the saved PWV GeoTIFF.
+    str | list[str]: Path to the saved PWV GeoTIFF.
 ''')
 def band_ratio(
     sur_refl_b02_path: str | list[str],
@@ -196,15 +199,15 @@ def band_ratio(
             4. T19 (transmittance at 0.940 µm)
 
     Parameters:
-        sur_refl_b02_path (str): Path to MODIS surface reflectance band sur_refl_b02 (0.865 µm) GeoTIFF.
-        sur_refl_b05_path (str): Path to MODIS surface reflectance band sur_refl_b05 (1.240 µm) GeoTIFF.
-        sur_refl_b17_path (str): Path to MODIS surface reflectance band sur_refl_b17 (0.905 µm) GeoTIFF.
-        sur_refl_b18_path (str): Path to MODIS surface reflectance band sur_refl_b18 (0.936 µm) GeoTIFF.
-        sur_refl_b19_path (str): Path to MODIS surface reflectance band sur_refl_b19 (0.940 µm) GeoTIFF.
-        output_path (str): Relative output path for the PWV GeoTIFF, e.g. "question17/pwv_2022-01-16.tif".
+        sur_refl_b02_path (str | list[str]): Path to MODIS surface reflectance band sur_refl_b02 (0.865 µm) GeoTIFF.
+        sur_refl_b05_path (str | list[str]): Path to MODIS surface reflectance band sur_refl_b05 (1.240 µm) GeoTIFF.
+        sur_refl_b17_path (str | list[str]): Path to MODIS surface reflectance band sur_refl_b17 (0.905 µm) GeoTIFF.
+        sur_refl_b18_path (str | list[str]): Path to MODIS surface reflectance band sur_refl_b18 (0.936 µm) GeoTIFF.
+        sur_refl_b19_path (str | list[str]): Path to MODIS surface reflectance band sur_refl_b19 (0.940 µm) GeoTIFF.
+        output_path (str | list[str]): Relative output path for the PWV GeoTIFF, e.g. "question17/pwv_2022-01-16.tif".
 
     Return:
-        str: Full path to the saved PWV GeoTIFF.
+        str | list[str]: Full path to the saved PWV GeoTIFF.
 
     Example:
         result = band_ratio(
@@ -271,19 +274,22 @@ def band_ratio(
 
 
 @mcp.tool(description='''
-Estimate Land Surface Temperature (LST) using the Single-Channel method, with NDVI-based emissivity estimation from RED and NIR bands.
+Batch-capable: Estimate Land Surface Temperature (LST) using the Single-Channel method, with NDVI-based emissivity estimation from RED and NIR bands.
 
-All raster path parameters accept either one string or equally sized lists. List
-inputs are processed as one batch call and results preserve input order.
+Process one scene or multiple scenes in a single tool call.
+Use strings for one scene, or lists for a batch including output_path.
+Equal-length lists pair by position. With unequal lengths, output filenames
+must contain acquisition dates; matching input scenes are grouped by date
+and composited. Batch results follow output_path order.
 
 Parameters:
-    bt_path (str): Brightness Temperature GeoTIFF (Kelvin).
-    red_path (str): Red band GeoTIFF (e.g., Landsat 8 Band 4).
-    nir_path (str): NIR band GeoTIFF (e.g., Landsat 8 Band 5).
-    output_path (str): relative path for the output raster file, e.g. "question17/lst_2022-01-16.tif"
+    bt_path (str | list[str]): Brightness Temperature GeoTIFF (Kelvin).
+    red_path (str | list[str]): Red band GeoTIFF (e.g., Landsat 8 Band 4).
+    nir_path (str | list[str]): NIR band GeoTIFF (e.g., Landsat 8 Band 5).
+    output_path (str | list[str]): relative path for the output raster file, e.g. "question17/lst_2022-01-16.tif"
 
 Returns:
-    str: Path to saved LST GeoTIFF.
+    str | list[str]: Path to saved LST GeoTIFF.
 ''')
 def lst_single_channel(
     bt_path: str | list[str],
@@ -308,14 +314,14 @@ def lst_single_channel(
         It is suitable for single thermal band sensors such as Landsat 8 TIRS.
 
     Parameters:
-        bt_path (str): Path to the Brightness Temperature GeoTIFF (Kelvin).
-        red_path (str): Path to the RED band GeoTIFF (e.g., Landsat 8 Band 4).
-        nir_path (str): Path to the NIR band GeoTIFF (e.g., Landsat 8 Band 5).
-        output_path (str): Relative path for the output LST GeoTIFF, 
+        bt_path (str | list[str]): Path to the Brightness Temperature GeoTIFF (Kelvin).
+        red_path (str | list[str]): Path to the RED band GeoTIFF (e.g., Landsat 8 Band 4).
+        nir_path (str | list[str]): Path to the NIR band GeoTIFF (e.g., Landsat 8 Band 5).
+        output_path (str | list[str]): Relative path for the output LST GeoTIFF,
                            e.g. "question17/lst_2022-01-16.tif".
 
     Return:
-        str: Full path to the saved LST GeoTIFF.
+        str | list[str]: Full path to the saved LST GeoTIFF.
 
     Example:
         result = lst_single_channel(
@@ -374,21 +380,24 @@ def lst_single_channel(
 
 
 @mcp.tool(description='''
-Estimate Land Surface Temperature (LST) using the multi-channel algorithm.
+Batch-capable: Estimate Land Surface Temperature (LST) using the multi-channel algorithm.
 
-All raster path parameters accept either one string or equally sized lists. List
-inputs are processed as one batch call and results preserve input order.
+Process one scene or multiple scenes in a single tool call.
+Use strings for one scene, or lists for a batch including output_path.
+Equal-length lists pair by position. With unequal lengths, output filenames
+must contain acquisition dates; matching input scenes are grouped by date
+and composited. Batch results follow output_path order.
 
 Requires local input files:
 - Two thermal infrared bands (e.g., Band 31 and Band 32) as GeoTIFF files.
 
 Parameters:
-    band31_path (str): Path to local GeoTIFF file for thermal band 31 (~11 μm).
-    band32_path (str): Path to local GeoTIFF file for thermal band 32 (~12 μm).
-    output_path (str): Relative path for the output raster file, e.g. "question17/lst_2022-01-16.tif"
+    band31_path (str | list[str]): Path to local GeoTIFF file for thermal band 31 (~11 μm).
+    band32_path (str | list[str]): Path to local GeoTIFF file for thermal band 32 (~12 μm).
+    output_path (str | list[str]): Relative path for the output raster file, e.g. "question17/lst_2022-01-16.tif"
 
 Returns:
-    str: Local file path of the exported LST image.
+    str | list[str]: Local file path of the exported LST image.
 ''')
 def lst_multi_channel(
     band31_path: str | list[str],
@@ -410,13 +419,13 @@ def lst_multi_channel(
         to reduce atmospheric effects and improve LST estimation accuracy.
 
     Parameters:
-        band31_path (str): Path to local GeoTIFF file for thermal band 31 (~11 μm).
-        band32_path (str): Path to local GeoTIFF file for thermal band 32 (~12 μm).
-        output_path (str): Relative path for the output LST GeoTIFF,
+        band31_path (str | list[str]): Path to local GeoTIFF file for thermal band 31 (~11 μm).
+        band32_path (str | list[str]): Path to local GeoTIFF file for thermal band 32 (~12 μm).
+        output_path (str | list[str]): Relative path for the output LST GeoTIFF,
                            e.g. "question17/lst_2022-01-16.tif".
 
     Return:
-        str: Full path to the saved LST GeoTIFF.
+        str | list[str]: Full path to the saved LST GeoTIFF.
 
     Example:
         result = lst_multi_channel(
@@ -461,10 +470,13 @@ def lst_multi_channel(
 
 
 @mcp.tool(description='''
-Estimate Land Surface Temperature (LST) or Precipitable Water Vapor (PWV) using the split-window algorithm.
+Batch-capable: Estimate Land Surface Temperature (LST) or Precipitable Water Vapor (PWV) using the split-window algorithm.
 
-All raster path parameters accept either one string or equally sized lists. List
-inputs are processed as one batch call and results preserve input order.
+Process one scene or multiple scenes in a single tool call.
+Use strings for one scene, or lists for a batch including output_path.
+Equal-length lists pair by position. With unequal lengths, output filenames
+must contain acquisition dates; matching input scenes are grouped by date
+and composited. Batch results follow output_path order.
 
 Requires local input files:
 - Thermal band 31 (~11 μm) GeoTIFF
@@ -473,15 +485,15 @@ Requires local input files:
 - Emissivity band 32 GeoTIFF
 
 Parameters:
-    band31_path (str): Path to thermal band 31 GeoTIFF.
-    band32_path (str): Path to thermal band 32 GeoTIFF.
-    emissivity31_path (str): Path to emissivity band 31 GeoTIFF.
-    emissivity32_path (str): Path to emissivity band 32 GeoTIFF.
+    band31_path (str | list[str]): Path to thermal band 31 GeoTIFF.
+    band32_path (str | list[str]): Path to thermal band 32 GeoTIFF.
+    emissivity31_path (str | list[str]): Path to emissivity band 31 GeoTIFF.
+    emissivity32_path (str | list[str]): Path to emissivity band 32 GeoTIFF.
     parameter (str): "LST" or "PWV" to specify output.
-    output_path (str): Relative path for the output raster file, e.g. "question17/lst_2022-01-16.tif"
+    output_path (str | list[str]): Relative path for the output raster file, e.g. "question17/lst_2022-01-16.tif"
 
 Returns:
-    str: Path to exported output GeoTIFF.
+    str | list[str]: Path to exported output GeoTIFF.
 ''')
 
 def split_window(
@@ -513,17 +525,17 @@ def split_window(
         Only one parameter is computed based on the user-selected `parameter`.
 
     Parameters:
-        band31_path (str): Path to thermal band 31 GeoTIFF (~11 μm).
-        band32_path (str): Path to thermal band 32 GeoTIFF (~12 μm).
-        emissivity31_path (str): Path to emissivity band 31 GeoTIFF.
-        emissivity32_path (str): Path to emissivity band 32 GeoTIFF.
+        band31_path (str | list[str]): Path to thermal band 31 GeoTIFF (~11 μm).
+        band32_path (str | list[str]): Path to thermal band 32 GeoTIFF (~12 μm).
+        emissivity31_path (str | list[str]): Path to emissivity band 31 GeoTIFF.
+        emissivity32_path (str | list[str]): Path to emissivity band 32 GeoTIFF.
         parameter (str): Specify either `"LST"` for Land Surface Temperature 
                          or `"PWV"` for Precipitable Water Vapor.
-        output_path (str): Relative path for the output raster file,
+        output_path (str | list[str]): Relative path for the output raster file,
                            e.g. `"question17/lst_2022-01-16.tif"`.
 
     Return:
-        str: Full path to the saved GeoTIFF containing the selected parameter.
+        str | list[str]: Full path to the saved GeoTIFF containing the selected parameter.
 
     Example:
         # Example 1: Retrieve LST
@@ -731,11 +743,14 @@ def temperature_emissivity_separation(
 
 
 @mcp.tool(description='''
-Estimate land surface temperature (LST) from local MODIS Day and Night brightness temperatures
+Batch-capable: Estimate land surface temperature (LST) from local MODIS Day and Night brightness temperatures
 using a single-channel correction method.
 
-All raster path parameters accept either one string or equally sized lists. List
-inputs are processed as one batch call and results preserve input order.
+Process one scene or multiple scenes in a single tool call.
+Use strings for one scene, or lists for a batch including output_path.
+Equal-length lists pair by position. With unequal lengths, output filenames
+must contain acquisition dates; matching input scenes are grouped by date
+and composited. Batch results follow output_path order.
 
 Requires local input GeoTIFF files:
 - BT_day_path: Brightness Temperature Day band (e.g., MODIS LST_Day_1km scaled by 0.02)
@@ -744,14 +759,14 @@ Requires local input GeoTIFF files:
 - Emis_night_path: Emissivity Night band (e.g., MODIS Emis_32 scaled by 0.002)
 
 Parameters:
-    BT_day_path (str): Path to local Brightness Temperature Day GeoTIFF.
-    BT_night_path (str): Path to local Brightness Temperature Night GeoTIFF.
-    Emis_day_path (str): Path to local Emissivity Day GeoTIFF.
-    Emis_night_path (str): Path to local Emissivity Night GeoTIFF.
-    output_path (str): relative path for the output raster file, e.g. "question17/lst_2022-01-16.tif"
+    BT_day_path (str | list[str]): Path to local Brightness Temperature Day GeoTIFF.
+    BT_night_path (str | list[str]): Path to local Brightness Temperature Night GeoTIFF.
+    Emis_day_path (str | list[str]): Path to local Emissivity Day GeoTIFF.
+    Emis_night_path (str | list[str]): Path to local Emissivity Night GeoTIFF.
+    output_path (str | list[str]): relative path for the output raster file, e.g. "question17/lst_2022-01-16.tif"
 
 Returns:
-    str: Path to the exported GeoTIFF containing six bands:
+    str | list[str]: Path to the exported GeoTIFF containing six bands:
          LST_Day, LST_Night, BT_Day, BT_Night, Emis_Day, Emis_Night.
 ''')
 def modis_day_night_lst(
@@ -778,15 +793,15 @@ def modis_day_night_lst(
         of emissivity and brightness temperature bands to output a six-band GeoTIFF.
 
     Parameters:
-        BT_day_path (str): Path to local MODIS Brightness Temperature Day GeoTIFF.
-        BT_night_path (str): Path to local MODIS Brightness Temperature Night GeoTIFF.
-        Emis_day_path (str): Path to MODIS Emissivity Day GeoTIFF (scaled by 0.002, offset by 0.49).
-        Emis_night_path (str): Path to MODIS Emissivity Night GeoTIFF (scaled by 0.002, offset by 0.49).
-        output_path (str): Relative path for saving the output raster file 
+        BT_day_path (str | list[str]): Path to local MODIS Brightness Temperature Day GeoTIFF.
+        BT_night_path (str | list[str]): Path to local MODIS Brightness Temperature Night GeoTIFF.
+        Emis_day_path (str | list[str]): Path to MODIS Emissivity Day GeoTIFF (scaled by 0.002, offset by 0.49).
+        Emis_night_path (str | list[str]): Path to MODIS Emissivity Night GeoTIFF (scaled by 0.002, offset by 0.49).
+        output_path (str | list[str]): Relative path for saving the output raster file
                            (e.g., "question17/lst_2022-01-16.tif").
 
     Return:
-        str: Path to the exported GeoTIFF with six bands:
+        str | list[str]: Path to the exported GeoTIFF with six bands:
              - Band 1: LST (Day)
              - Band 2: LST (Night)
              - Band 3: BT (Day)
@@ -1006,6 +1021,8 @@ def ttm_lst(
 Calculate the average Land Surface Temperature (LST) across multiple images
 where NDVI is either above or below a given threshold.
 
+Input read or band errors abort the entire call; no partial aggregate is returned.
+
 Parameters:
     red_paths (str or list): Path(s) to red band image(s).
     nir_paths (str or list): Path(s) to near-infrared (NIR) image(s).
@@ -1014,8 +1031,8 @@ Parameters:
     mode (str): 'above' for NDVI >= threshold, 'below' for NDVI < threshold.
 
 Returns:
-    float: Mean of LST values over selected NDVI regions across all image sets.
-               Returns np.nan if no valid pixels found.
+    float | null: Mean of LST values over selected NDVI regions across all image sets.
+               Returns null if no pixels satisfy the condition.
 ''')
 def calculate_mean_lst_by_ndvi(
     red_paths: str | list[str],
@@ -1028,6 +1045,8 @@ def calculate_mean_lst_by_ndvi(
     Calculate the average Land Surface Temperature (LST) across multiple images
     where NDVI is either above or below a given threshold.
 
+    Input read or band errors abort the entire call; no partial aggregate is returned.
+
     Parameters:
         red_paths (str or list): Path(s) to red band image(s).
         nir_paths (str or list): Path(s) to near-infrared (NIR) image(s).
@@ -1036,8 +1055,8 @@ def calculate_mean_lst_by_ndvi(
         mode (str): 'above' for NDVI >= threshold, 'below' for NDVI < threshold.
 
     Returns:
-        float: Mean of LST values over selected NDVI regions across all image sets.
-               Returns np.nan if no valid pixels found.
+        float | null: Mean of LST values over selected NDVI regions across all image sets.
+               Returns null if no pixels satisfy the condition.
     """
     import rasterio
     import numpy as np
@@ -1053,34 +1072,29 @@ def calculate_mean_lst_by_ndvi(
     all_selected_lst = []
 
     for red_path, nir_path, lst_path in zip(red_paths, nir_paths, lst_paths):
-        try:
-            with rasterio.open(red_path) as red_src, \
-                 rasterio.open(nir_path) as nir_src, \
-                 rasterio.open(lst_path) as lst_src:
+        with rasterio.open(red_path) as red_src, \
+             rasterio.open(nir_path) as nir_src, \
+             rasterio.open(lst_path) as lst_src:
 
-                red = red_src.read(1).astype('float32')
-                nir = nir_src.read(1).astype('float32')
-                lst = lst_src.read(1).astype('float32')
+            red = red_src.read(1).astype('float32')
+            nir = nir_src.read(1).astype('float32')
+            lst = lst_src.read(1).astype('float32')
 
-                # Avoid division by zero
-                ndvi_denominator = (nir + red)
-                ndvi_denominator[ndvi_denominator == 0] = np.nan
+            # Avoid division by zero
+            ndvi_denominator = (nir + red)
+            ndvi_denominator[ndvi_denominator == 0] = np.nan
 
-                ndvi = (nir - red) / ndvi_denominator
+            ndvi = (nir - red) / ndvi_denominator
 
-                if mode == 'below':
-                    mask = (ndvi < ndvi_threshold) & np.isfinite(lst)
-                else:
-                    mask = (ndvi >= ndvi_threshold) & np.isfinite(lst)
+            if mode == 'below':
+                mask = (ndvi < ndvi_threshold) & np.isfinite(lst)
+            else:
+                mask = (ndvi >= ndvi_threshold) & np.isfinite(lst)
 
-                selected_lst = lst[mask]
+            selected_lst = lst[mask]
 
-                if selected_lst.size > 0:
-                    all_selected_lst.append(selected_lst)
-
-        except Exception as e:
-            print(f"Error processing {red_path}, {nir_path}, {lst_path}: {e}")
-            continue
+            if selected_lst.size > 0:
+                all_selected_lst.append(selected_lst)
 
     if not all_selected_lst:
         return None
@@ -1149,22 +1163,25 @@ def calculate_max_lst_by_ndvi(red_path, nir_path, lst_path, ndvi_threshold, mode
 
 
 @mcp.tool(description='''
-Estimate Apparent Thermal Inertia (ATI) using the Thermal Inertia Method.
+Batch-capable: Estimate Apparent Thermal Inertia (ATI) using the Thermal Inertia Method.
 
-All raster path parameters accept either one string or equally sized lists. List
-inputs are processed as one batch call and results preserve input order.
+Process one scene or multiple scenes in a single tool call.
+Use strings for one scene, or lists for a batch including output_path.
+Equal-length lists pair by position. With unequal lengths, output filenames
+must contain acquisition dates; matching input scenes are grouped by date
+and composited. Batch results follow output_path order.
 
 This method calculates ATI as (1 - albedo) / (day_temp - night_temp),
 which serves as a proxy for land surface temperature stability over diurnal cycles.
 
 Parameters:
-    day_temp_path (str): File path to daytime brightness temperature GeoTIFF.
-    night_temp_path (str): File path to nighttime brightness temperature GeoTIFF.
-    albedo_path (str): File path to surface albedo GeoTIFF.
-    output_path (str): Relative path for the output raster file, e.g. "question17/thermal_inertia_2022-01-16.tif"
+    day_temp_path (str | list[str]): File path to daytime brightness temperature GeoTIFF.
+    night_temp_path (str | list[str]): File path to nighttime brightness temperature GeoTIFF.
+    albedo_path (str | list[str]): File path to surface albedo GeoTIFF.
+    output_path (str | list[str]): Relative path for the output raster file, e.g. "question17/thermal_inertia_2022-01-16.tif"
 
 Returns:
-    str: Path to the exported ATI GeoTIFF.
+    str | list[str]: Path to the exported ATI GeoTIFF.
 ''')
 def ATI(
     day_temp_path: str | list[str],
@@ -1190,14 +1207,14 @@ def ATI(
         raster's resolution and extent before calculation.
 
     Parameters:
-        day_temp_path (str): Path to the daytime brightness temperature (BT) GeoTIFF.
-        night_temp_path (str): Path to the nighttime brightness temperature (BT) GeoTIFF.
-        albedo_path (str): Path to the surface albedo GeoTIFF.
-        output_path (str): Relative path to save the ATI raster, e.g.
+        day_temp_path (str | list[str]): Path to the daytime brightness temperature (BT) GeoTIFF.
+        night_temp_path (str | list[str]): Path to the nighttime brightness temperature (BT) GeoTIFF.
+        albedo_path (str | list[str]): Path to the surface albedo GeoTIFF.
+        output_path (str | list[str]): Relative path to save the ATI raster, e.g.
                            "question17/thermal_inertia_2022-01-16.tif".
 
     Return:
-        str: Path to the saved Apparent Thermal Inertia GeoTIFF file.
+        str | list[str]: Path to the saved Apparent Thermal Inertia GeoTIFF file.
 
     Example:
         >>> ATI(
