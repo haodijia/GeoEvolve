@@ -1016,21 +1016,6 @@ def max_value_and_index(x: list):
     return (float(max_value), int(max_index))
 
 
-@mcp.tool(description="Return the zero-based index of the largest list value.")
-def argmax(x: list) -> int:
-    if not x:
-        raise ValueError("x must not be empty")
-    import numpy as np
-
-    return int(np.argmax(np.asarray(x)))
-
-
-@mcp.tool(description="Map a start index to two adjacent dates.")
-def index_to_date_range(dates: list[str], start_index: int) -> dict[str, str]:
-    if start_index < 0 or start_index + 1 >= len(dates):
-        raise ValueError("start_index must identify the first of two adjacent dates")
-    return {"from": dates[start_index], "to": dates[start_index + 1]}
-
 @mcp.tool(description='''
 Description:
 Find the minimum value in a list and return both the minimum value and its index.

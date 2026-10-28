@@ -1,5 +1,7 @@
 # Earth-Bench pro max
 
+沿用 Earth-Agent 官方的 104 个工具接口，参考轨迹统一使用这套工具集。
+
 用于复现 Earth-Agent、评测遥感任务、组合和比较自研组件的实验框架。基础 agent、数据集、组件和评测独立组织，所有实验使用 YAML 配置。
 
 ```text

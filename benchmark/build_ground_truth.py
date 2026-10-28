@@ -17,6 +17,13 @@ DEFAULT_QUESTIONS = DATASET.root / "provenance" / "source_questions.json"
 DEFAULT_OUTPUT = DATASET.path("ground_truth")
 RUNTIME_OUTPUT_ROOT = Path("tmp/out")
 
+INDEX_BATCH_FIELDS = {
+    "calculate_batch_ndvi": ("input_nir_paths", "input_red_paths", "output_paths"),
+    "calculate_batch_ndwi": ("input_nir_paths", "input_swir_paths", "output_paths"),
+    "calculate_batch_nbr": ("input_nir_paths", "input_swir_paths", "output_paths"),
+    "calculate_batch_ndti": ("input_red_paths", "input_green_paths", "output_paths"),
+}
+
 
 BATCH_RASTER_FIELDS = {
     "compute_tvdi": {
@@ -473,13 +480,13 @@ def _repair_calls(question_id: str, calls: list[dict[str, Any]]) -> None:
         calls.insert(
             lst_index,
             {
-                "name": "calculate_ndvi",
+                "name": "calculate_batch_ndvi",
                 "input": {
-                    "input_nir_path": "data/question100/New York_2021-10-22_b5.tif",
-                    "input_red_path": "data/question100/New York_2021-10-22_b4.tif",
-                    "output_path": "question100/ndvi_2021-10-22.tif",
+                    "input_nir_paths": ["data/question100/New York_2021-10-22_b5.tif"],
+                    "input_red_paths": ["data/question100/New York_2021-10-22_b4.tif"],
+                    "output_paths": ["question100/ndvi_2021-10-22.tif"],
                 },
-                "output": "tmp/out/question100/ndvi_2021-10-22.tif",
+                "output": ["tmp/out/question100/ndvi_2021-10-22.tif"],
             },
         )
         intersection = next(
@@ -617,14 +624,19 @@ def _normalise_call(name: str, arguments: dict[str, Any]) -> list[dict[str, Any]
     if name == "calculate_ndti" and "input_pairs" in arguments:
         return [
             {
-                "name": name,
+                "name": "calculate_batch_ndti",
                 "input": {
-                    "input_red_path": pair["input_red_path"],
-                    "input_green_path": pair["input_green_path"],
-                    "output_path": pair["output_filename"],
+                    "input_red_paths": [
+                        pair["input_red_path"] for pair in arguments["input_pairs"]
+                    ],
+                    "input_green_paths": [
+                        pair["input_green_path"] for pair in arguments["input_pairs"]
+                    ],
+                    "output_paths": [
+                        pair["output_filename"] for pair in arguments["input_pairs"]
+                    ],
                 },
             }
-            for pair in arguments["input_pairs"]
         ]
 
     key_renames = {
@@ -654,7 +666,50 @@ def _normalise_call(name: str, arguments: dict[str, Any]) -> list[dict[str, Any]
     if name == "SAM2" and "/out/" in normalised["output_path"]:
         normalised["output_path"] = normalised["output_path"].replace("/out/", "/")
 
+    if name in {"calculate_ndvi", "calculate_ndwi", "calculate_nbr", "calculate_ndti"}:
+        name = name.replace("calculate_", "calculate_batch_", 1)
+        normalised = {key + "s": [value] for key, value in normalised.items()}
+
     return [{"name": name, "input": normalised}]
+
+
+def _official_tool_calls(calls: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Use the official inventory and combine consecutive independent index calls."""
+    result: list[dict[str, Any]] = []
+    for call in calls:
+        if call["name"] == "argmax":
+            values = call["input"]["x"]
+            maximum = max(values)
+            call["name"] = "max_value_and_index"
+            call["output"] = [maximum, values.index(maximum)]
+        elif call["name"] == "index_to_date_range":
+            dates = call["input"]["dates"]
+            index = call["input"]["start_index"]
+            if not 0 <= index < len(dates) - 1:
+                raise ValueError("date range must identify two adjacent dates")
+            call["name"] = "get_list_object_via_indexes"
+            call["input"] = {"input_list": dates, "indexes": [index, index + 1]}
+            call["output"] = [dates[index], dates[index + 1]]
+
+        fields = INDEX_BATCH_FIELDS.get(call["name"])
+        if fields:
+            call["output"] = [
+                _runtime_output(path) for path in call["input"]["output_paths"]
+            ]
+            if result and result[-1]["name"] == call["name"]:
+                previous = result[-1]
+                inputs = {
+                    path
+                    for field in fields[:-1]
+                    for path in call["input"][field]
+                }
+                if inputs.isdisjoint(previous["output"]):
+                    for field in fields:
+                        previous["input"][field].extend(call["input"][field])
+                    previous["output"].extend(call["output"])
+                    continue
+        result.append(call)
+    return result
 
 
 def _content(message: dict[str, Any]) -> Any:
@@ -694,6 +749,7 @@ def build_ground_truth(questions: dict[str, Any]) -> list[dict[str, Any]]:
                     calls[index]["output"] = None
 
         _repair_calls(f"question{question_id}", calls)
+        calls = _official_tool_calls(calls)
 
         evaluations = question.get("evaluation") or []
         if not evaluations:

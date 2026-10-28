@@ -72,10 +72,6 @@ def _calculate_ndvi(input_nir_path, input_red_path, output_path):
     return f'Result save at {TEMP_DIR / output_path}'
 
 
-@mcp.tool(description="Calculate NDVI from one NIR/Red raster pair.")
-def calculate_ndvi(input_nir_path, input_red_path, output_path):
-    return _calculate_ndvi(input_nir_path, input_red_path, output_path)
-
 @mcp.tool(description="""
 Batch-calculate NDVI from multiple pairs of NIR/Red raster files and save results.
 
@@ -85,7 +81,7 @@ Parameters:
     output_paths (list[str]): Relative output paths (e.g., "question17/ndvi_2022-01-16.tif") for each pair.
 
 Returns:
-    list[str]: A list of result messages (one per output), as returned by `calculate_ndvi`.
+    list[str]: A list of result messages, one per output.
 """)
 def calculate_batch_ndvi(
     input_nir_paths: list[str],
@@ -161,10 +157,6 @@ def _calculate_ndwi(input_nir_path, input_swir_path, output_path):
     return f'Result save at {TEMP_DIR / output_path}'
 
 
-@mcp.tool(description="Calculate NDWI from one NIR/SWIR raster pair.")
-def calculate_ndwi(input_nir_path, input_swir_path, output_path):
-    return _calculate_ndwi(input_nir_path, input_swir_path, output_path)
-
 @mcp.tool(description="""
 Batch-calculate NDWI from multiple pairs of NIR/SWIR raster files and save results.
 
@@ -174,7 +166,7 @@ Parameters:
     output_paths (list[str]): Relative output paths (e.g., "question17/ndwi_2022-01-16.tif") for each pair.
 
 Returns:
-    list[str]: A list of result messages (one per output), as returned by `calculate_ndwi`.
+    list[str]: A list of result messages, one per output.
 """)
 def calculate_batch_ndwi(
     input_nir_paths: list[str],
@@ -437,10 +429,6 @@ def _calculate_nbr(input_nir_path, input_swir_path, output_path):
     return f'Result save at {TEMP_DIR / output_path}'
 
 
-@mcp.tool(description="Calculate NBR from one NIR/SWIR raster pair.")
-def calculate_nbr(input_nir_path, input_swir_path, output_path):
-    return _calculate_nbr(input_nir_path, input_swir_path, output_path)
-
 @mcp.tool(description="""
 Batch-calculate NBR from multiple pairs of NIR/SWIR raster files and save results.
 
@@ -450,7 +438,7 @@ Parameters:
     output_paths (list[str]): Relative output paths (e.g., "question17/nbr_2022-01-16.tif") for each pair.
 
 Returns:
-    list[str]: A list of result messages (one per output), as returned by `calculate_nbr`.
+    list[str]: A list of result messages, one per output.
 """)
 def calculate_batch_nbr(
     input_nir_paths: list[str],
@@ -732,10 +720,6 @@ def _calculate_ndti(input_red_path, input_green_path, output_path):
     return f'Result save at {TEMP_DIR / output_path}'
 
 
-@mcp.tool(description="Calculate NDTI from one red/green raster pair.")
-def calculate_ndti(input_red_path, input_green_path, output_path):
-    return _calculate_ndti(input_red_path, input_green_path, output_path)
-
 @mcp.tool(description="""
 Batch-calculate NDTI from multiple pairs of Red/Green raster files and save results.
 
@@ -745,7 +729,7 @@ Parameters:
     output_paths (list[str]): Relative output paths (e.g., "question17/ndti_2022-01-16.tif") for each pair.
 
 Returns:
-    list[str]: A list of result messages (one per output), as returned by `calculate_ndti`.
+    list[str]: A list of result messages, one per output.
 """)
 def calculate_batch_ndti(
     input_red_paths: list[str],

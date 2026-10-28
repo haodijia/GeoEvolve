@@ -56,7 +56,7 @@ uv run --locked python -m benchmark.prepare --check
 
 ```bash
 uv run --locked python -m benchmark.prepare --seal \
-  --repo haodijia/EarthBench-Fixed --version 2026-10-28 --revision master
+  --repo haodijia/EarthBench-Fixed --version 2026-10-28-tools104 --revision master
 ```
 
 参考轨迹重建使用归档的源问题文件，普通运行和评测直接使用发布的参考文件：

@@ -1,6 +1,6 @@
 # Earth-Bench pro max MCP tools
 
-The benchmark exposes 110 local MCP tools across Analysis, Index, Inversion,
+The benchmark exposes the official 104 local MCP tools across Analysis, Index, Inversion,
 Perception, and Statistics. CPU raster operations use Rasterio. Perception reads
 the fixed observation CSV and masks; benchmark runs require no GPU model service.
 
@@ -11,8 +11,8 @@ uv run --locked python -m scripts.validate_mcp_tools
 uv run --locked python -m scripts.validate_mcp_tools --replay-ground-truth
 ```
 
-The first validator command checks all 1,378 reference-call schemas and invokes
-all 110 tools on generated fixtures, without requiring benchmark imagery. The
+The first validator command checks all 1,331 reference-call schemas and invokes
+all 104 tools on generated fixtures, without requiring benchmark imagery. The
 full replay additionally checks source-file flow, executes all 248 reference
 trajectories, and invokes all 461 real cached observations. A missing asset,
 invalid schema, or failed call makes validation fail.
@@ -49,7 +49,14 @@ assets directly.
 
 ## Reference-tool inventory
 
-Official dialogs call six interfaces absent from the released 104-tool inventory:
-`calculate_ndvi`, `calculate_ndwi`, `calculate_nbr`, `calculate_ndti`, `argmax`, and
-`index_to_date_range`. This environment exposes all six for a total of 110 tools.
-All compared methods use this same repaired inventory and reference trajectories.
+The exposed tool names match the official Earth-Agent inventory at commit
+`ca1dfaef750654331308a434966d307f1728fd90`: Analysis 10, Index 12,
+Inversion 17, Perception 15, and Statistics 50.
+
+Source dialogs contain six names outside that inventory. Published reference
+trajectories use `calculate_batch_ndvi`, `calculate_batch_ndwi`,
+`calculate_batch_nbr`, and `calculate_batch_ndti` with list inputs in place of
+the single-image calls. Consecutive independent calls are combined into a batch.
+`argmax` is represented by `max_value_and_index`, and date-range selection uses
+`get_list_object_via_indexes`. The source dialogs remain archived under dataset
+provenance; no additional tool interfaces are exposed.

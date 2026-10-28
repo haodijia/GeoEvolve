@@ -1,7 +1,7 @@
 {
   "dataset": "earthbench",
   "repo": "haodijia/EarthBench-Fixed",
-  "revision": "7ef1bccaeaaaaf3923b54bf8b8e81aa8d9c8f222",
-  "version": "2026-10-28",
-  "manifest_sha256": "99e7e04ee22ab9e4a3cf76dce9893d644bb1e0223d3e75f8e706626e091b27dd"
+  "revision": "3eaf5168ccdd05aaa6f01acfacfbd4490da46bec",
+  "version": "2026-10-28-tools104",
+  "manifest_sha256": "cbe6563823d8cd412c45b672ee1afa230a53919befd36962e487614a16343278"
 }
