@@ -4,15 +4,15 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-from dataclasses import replace
-from datetime import datetime
 import json
 import re
+from dataclasses import replace
+from datetime import datetime
 from pathlib import Path
 
 from agent.config import ExperimentConfig, PluginConfig
 from agent.runner import run_experiment
-from benchmark.dataset import Dataset, REPO_ROOT
+from benchmark.dataset import REPO_ROOT, Dataset
 from plugins import create_plugins
 
 
@@ -31,6 +31,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--datasets", nargs="+", help="Dataset names under benchmark/")
     parser.add_argument(
         "--sample", type=int, help="Questions per dataset; omit to use the config"
+    )
+    parser.add_argument(
+        "--concurrency", type=int, help="Concurrent questions per run; default: config"
     )
     parser.add_argument(
         "--plugins",
@@ -59,7 +62,7 @@ def build_parser() -> argparse.ArgumentParser:
 def resolve_config(args: argparse.Namespace) -> ExperimentConfig:
     config = ExperimentConfig.from_yaml(args.config)
     updates = {}
-    for key in ("datasets", "sample"):
+    for key in ("datasets", "sample", "concurrency"):
         if getattr(args, key) is not None:
             updates[key] = getattr(args, key)
     if args.plugins is not None:
@@ -83,6 +86,7 @@ async def run_experiments(args: argparse.Namespace, config: ExperimentConfig) ->
         "model": config.model_name,
         "plugins": [item.name for item in config.plugins],
         "max_attempts": config.max_attempts,
+        "concurrency": config.concurrency,
         "datasets": [
             {
                 "name": dataset.name,

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import inspect
 import json
 import shutil
 from pathlib import Path
 from typing import Any
 
-from agent.agent import create_agent, handle_question, load_config
+from agent.agent import create_agent, handle_question, load_model, load_tool_servers
 from agent.answers import (
     aggregate_results,
     compute_statistics,
@@ -58,8 +59,22 @@ def clear_tool_outputs(directory: Path) -> None:
             artifact.unlink()
 
 
+def question_workspace(output_dir: Path, question_id: str) -> Path:
+    name = f"question{question_id}" if question_id.isdigit() else question_id
+    if (
+        not name
+        or name in {".", ".."}
+        or Path(name).name != name
+        or "\\" in name
+        or "\0" in name
+    ):
+        raise ValueError(f"Question ID cannot be used as a directory: {question_id!r}")
+    return output_dir / "out" / name
+
+
 async def run_single_attempt(
-    agent: Any,
+    llm: Any,
+    dataset: Dataset,
     questions: list[dict],
     attempt: int,
     chat_log_path: Path,
@@ -69,24 +84,38 @@ async def run_single_attempt(
     logger: Any,
     completed_results: list[dict],
 ) -> dict:
-    results = []
-    completed = {str(item["question_id"]): item for item in completed_results}
+    ids = [str(question["question_id"]) for question in questions]
+    results = {str(item["question_id"]): item for item in completed_results}
     path = output_dir / "traces" / f"attempt_{attempt}.jsonl"
     path.parent.mkdir(parents=True, exist_ok=True)
-    tool_output_dir = output_dir / "out"
-    clear_tool_outputs(tool_output_dir)
-    for question in questions:
-        qid = str(question["question_id"])
-        if qid in completed:
-            results.append(completed[qid])
-            continue
-        try:
-            answer, usage, calls = await handle_question(
-                agent, question, chat_log_path, config, plugins, logger=logger
-            )
-            has_issue, reasons = heuristic_critic_has_issue(answer)
-            results.append(
-                {
+    semaphore = asyncio.Semaphore(config.concurrency)
+    plugin_lock = asyncio.Lock()
+
+    def persist() -> None:
+        # One event loop writes a complete snapshot without an await in between.
+        _flush_results(path, [results[qid] for qid in ids if qid in results])
+
+    async def execute(question: dict) -> None:
+        async with semaphore:
+            qid = str(question["question_id"])
+            tool_output_dir = question_workspace(output_dir, qid)
+            clear_tool_outputs(tool_output_dir)
+            client = None
+            try:
+                servers = load_tool_servers(config, tool_output_dir, dataset)
+                agent, client = await create_agent(llm, servers)
+                answer, usage, calls = await handle_question(
+                    agent,
+                    question,
+                    chat_log_path,
+                    config,
+                    plugins,
+                    plugin_lock=plugin_lock,
+                    tool_output_dir=tool_output_dir,
+                    logger=logger,
+                )
+                has_issue, reasons = heuristic_critic_has_issue(answer)
+                results[qid] = {
                     "question_id": question["question_id"],
                     "attempt": attempt,
                     "answer": answer,
@@ -101,20 +130,41 @@ async def run_single_attempt(
                     "tool_calls": calls,
                     "tool_output_dir": str(tool_output_dir.resolve()),
                 }
-            )
-            _flush_results(path, results)
-        finally:
-            clear_tool_outputs(tool_output_dir)
+                persist()
+            finally:
+                try:
+                    if client is not None and hasattr(client, "close"):
+                        closed = client.close()
+                        if inspect.isawaitable(closed):
+                            await closed
+                finally:
+                    clear_tool_outputs(tool_output_dir)
+                    tool_output_dir.rmdir()
 
-    _flush_results(path, results)
+    tasks = [
+        asyncio.create_task(execute(question))
+        for question in questions
+        if str(question["question_id"]) not in results
+    ]
+    try:
+        await asyncio.gather(*tasks)
+    except BaseException:
+        for task in tasks:
+            task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+    persist()
+    ordered_results = [results[qid] for qid in ids]
     return {
         "attempt": attempt,
-        "results": results,
+        "results": ordered_results,
         "failed_ids": [
-            str(item["question_id"]) for item in results if item["heuristic_issue"]
+            str(item["question_id"])
+            for item in ordered_results
+            if item["heuristic_issue"]
         ],
         "token_usage": {
-            key: sum(item["token_usage"][key] for item in results)
+            key: sum(item["token_usage"][key] for item in ordered_results)
             for key in TOKEN_FIELDS
         },
         "plugin_token_usage": dict.fromkeys(TOKEN_FIELDS, 0),
@@ -222,6 +272,12 @@ async def run_experiment(
 ) -> Path:
     """Store one execution in result/ and its evaluation beside it."""
     questions = dataset.load_questions(config.sample)
+    workspaces = [
+        question_workspace(Path("."), str(question["question_id"]))
+        for question in questions
+    ]
+    if len({str(path).casefold() for path in workspaces}) != len(workspaces):
+        raise ValueError("Question IDs must have distinct workspace directory names")
     snapshot = {
         **dataset.protocol(),
         "question_ids": [str(item["question_id"]) for item in questions],
@@ -326,19 +382,17 @@ async def _execute_experiment(
                 cleanup_log_after_continue(log, missing | set(errors))
     plugins = create_plugins(config.plugins)
     clear_tool_outputs(result_dir / "out")
-    llm, servers = load_config(config, result_dir, dataset)
-    client = None
+    llm = load_model(config)
     logger = create_experiment_logger(
         result_dir, config.model_name, autoplanning=config.autoplanning
     )
     chat_log = result_dir / "run.chat"
     print(
-        f"Dataset: {dataset.name} | Model: {config.model_name} | Plugins: {config.method_label} | Output: {result_dir}"
+        f"Dataset: {dataset.name} | Model: {config.model_name} | Plugins: {config.method_label} | Concurrency: {config.concurrency} | Output: {result_dir}"
     )
     try:
         for plugin in plugins:
             await plugin.setup(PluginContext(config, result_dir, llm))
-        agent, client = await create_agent(llm, servers)
         if history and history[-1]["failed_ids"]:
             await _feedback(plugins, history[-1], chat_log)
         for attempt in range(start_attempt, config.max_attempts + 1):
@@ -354,7 +408,8 @@ async def _execute_experiment(
                 ]
             )
             result = await run_single_attempt(
-                agent,
+                llm,
+                dataset,
                 selected,
                 attempt,
                 chat_log,
@@ -373,14 +428,8 @@ async def _execute_experiment(
         _save_summary(result_dir, config, dataset, questions, history)
     finally:
         try:
-            if client is not None and hasattr(client, "close"):
-                result = client.close()
-                if inspect.isawaitable(result):
-                    await result
+            clear_tool_outputs(result_dir / "out")
         finally:
-            try:
-                clear_tool_outputs(result_dir / "out")
-            finally:
-                for handler in list(logger.handlers):
-                    handler.close()
-                    logger.removeHandler(handler)
+            for handler in list(logger.handlers):
+                handler.close()
+                logger.removeHandler(handler)

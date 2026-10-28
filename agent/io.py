@@ -23,15 +23,10 @@ def save_chat_message(
     path = Path(chat_log_path)
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    if role == "user":
-        md = {**(metadata or {}), "question_id": question_id}
-        name = "user"
-    elif role == "assistant":
-        md = None
-        name = question_id
-    else:
-        md = None
-        name = "system"
+    md = {**(metadata or {}), "question_id": question_id}
+    name = (
+        "user" if role == "user" else question_id if role == "assistant" else "system"
+    )
 
     record = {
         "id": uuid.uuid4().hex,
@@ -88,40 +83,18 @@ def create_experiment_logger(
 
 
 def _filter_chat_through_attempt(chat_path: Path, n: int) -> list[str]:
-    """Return messages from attempts 1..n of a ``.chat`` file.
-
-    Attempt boundaries are inferred by counting how many times each
-    ``question_id`` appears as a *user* message. The k-th user message
-    for a given qid starts attempt-k; messages are kept while the count
-    for the current qid is <= n.
-    """
+    """Keep attempts 1..n independently for each question in interleaved logs."""
     counts: dict[str, int] = {}
-    capturing = True
-    out: list[str] = []
-
-    with open(chat_path, "r", encoding="utf-8") as f:
-        for raw in f:
-            raw = raw.rstrip("\n")
-            if not raw.strip():
-                continue
-            try:
-                msg = json.loads(raw)
-            except json.JSONDecodeError:
-                continue
-
-            role = msg.get("role", "")
-            md = msg.get("metadata") or {}
-            qid = str(md.get("question_id", ""))
-
-            if role == "user" and qid:
-                counts[qid] = counts.get(qid, 0) + 1
-                capturing = counts[qid] <= n
-                if not capturing:
-                    continue
-
-            if capturing:
-                out.append(raw)
-
+    out = []
+    for raw in chat_path.read_text(encoding="utf-8").splitlines():
+        if not raw.strip():
+            continue
+        message = json.loads(raw)
+        qid = str(message["metadata"]["question_id"])
+        if message["role"] == "user":
+            counts[qid] = counts.get(qid, 0) + 1
+        if 0 < counts.get(qid, 0) <= n:
+            out.append(raw)
     return out
 
 
@@ -240,108 +213,31 @@ def seed_resume_files(
             )
 
 
-def cleanup_chat_after_continue(
-    chat_path: PathLike, error_qids: set[str] | None = None
-) -> None:
-    """Remove error-qid entries from ``.chat`` before retrying.
-
-    When *error_qids* is given, only segments belonging to those qids are
-    removed entirely.  When *error_qids* is None, falls back to deduplication
-    (keeps last occurrence per qid).
-
-    Called **before** the retry runs, so the retry appends clean results.
-    """
+def cleanup_chat_after_continue(chat_path: PathLike, error_qids: set[str]) -> None:
+    """Remove only unfinished/error questions, regardless of message interleaving."""
     path = Path(chat_path)
     if not path.exists():
         return
-
-    raw_lines: list[str] = []
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.rstrip("\n")
-            if line.strip():
-                raw_lines.append(line)
-
-    # Identify segments: each segment starts with a user msg that has a qid
-    segments: list[tuple[str, list[str]]] = []  # (qid, [lines])
-    current_qid = ""
-    current_lines: list[str] = []
-
-    for raw in raw_lines:
-        try:
-            msg = json.loads(raw)
-        except json.JSONDecodeError:
-            if current_lines:
-                current_lines.append(raw)
-            continue
-
-        role = msg.get("role", "")
-        md = msg.get("metadata") or {}
-        qid = str(md.get("question_id", ""))
-
-        if role == "user" and qid:
-            if current_lines:
-                segments.append((current_qid, current_lines))
-            current_qid = qid
-            current_lines = [raw]
-        else:
-            current_lines.append(raw)
-
-    if current_lines:
-        segments.append((current_qid, current_lines))
-
-    if error_qids is not None:
-        # Remove ALL segments for error qids (they'll be re-run fresh)
-        kept: list[str] = []
-        for qid, lines in segments:
-            if qid not in error_qids:
-                kept.extend(lines)
-    else:
-        # Fallback: keep only the LAST segment per qid
-        last_index: dict[str, int] = {}
-        for i, (qid, _) in enumerate(segments):
-            if qid:
-                last_index[qid] = i
-        kept = []
-        for i, (qid, lines) in enumerate(segments):
-            if not qid or last_index.get(qid) == i:
-                kept.extend(lines)
-
+    kept = [
+        raw
+        for raw in path.read_text(encoding="utf-8").splitlines()
+        if raw.strip()
+        and str(json.loads(raw)["metadata"]["question_id"]) not in error_qids
+    ]
     path.write_text("\n".join(kept) + "\n" if kept else "", encoding="utf-8")
 
 
-def cleanup_log_after_continue(
-    log_path: PathLike, error_qids: set[str] | None = None
-) -> None:
-    """Remove error-qid entries from ``.log`` before retrying.
-
-    When *error_qids* is given, all records for those qids are removed.
-    When None, falls back to deduplication (keeps last per qid).
-    """
+def cleanup_log_after_continue(log_path: PathLike, error_qids: set[str]) -> None:
+    """Remove unfinished/error question records from the structured log."""
     path = Path(log_path)
     if not path.exists():
         return
-
-    blocks: list[tuple[str, str]] = []  # (qid, block_text)
-    for block, record in _iter_json_log_blocks(path):
-        if isinstance(record, dict):
-            qidx = str(record.get("question_index", ""))
-            blocks.append((qidx, block))
-        else:
-            blocks.append(("", block))
-
-    if error_qids is not None:
-        kept: list[str] = [block for qid, block in blocks if qid not in error_qids]
-    else:
-        last_index: dict[str, int] = {}
-        for i, (qid, _) in enumerate(blocks):
-            if qid:
-                last_index[qid] = i
-        kept = []
-        for i, (qid, block) in enumerate(blocks):
-            if not qid or last_index.get(qid) == i:
-                kept.append(block)
-
+    kept = [
+        block
+        for block, record in _iter_json_log_blocks(path)
+        if not isinstance(record, dict)
+        or str(record.get("question_index", "")) not in error_qids
+    ]
     path.write_text("\n".join(kept) + "\n" if kept else "", encoding="utf-8")
 
 

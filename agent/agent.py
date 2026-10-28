@@ -5,15 +5,14 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
-
 from pathlib import Path
 from typing import Any
 
-from agent.config import ExperimentConfig, ModelConfig
 from agent.answers import extract_answer_from_response
+from agent.config import ExperimentConfig, ModelConfig
 from agent.io import save_chat_message
 from agent.tokens import message_token_usage
-from benchmark.dataset import Dataset, REPO_ROOT
+from benchmark.dataset import REPO_ROOT, Dataset
 from plugins.base import AgentPlugin
 
 
@@ -45,14 +44,13 @@ def load_model(config: ModelConfig) -> Any:
     return _chat_openai_class()(**kwargs)
 
 
-def load_config(
-    config: ExperimentConfig, output_dir: Path | str, dataset: Dataset
-) -> tuple[Any, dict]:
-    """Build the actor and strict MCP server configuration for one dataset run."""
+def load_tool_servers(
+    config: ExperimentConfig, tool_output_dir: Path, dataset: Dataset
+) -> dict:
+    """Bind every MCP tool to one question's isolated workspace."""
     import os
 
-    tool_output_dir = Path(output_dir).resolve() / "out"
-    tool_output_dir.mkdir(parents=True, exist_ok=True)
+    tool_output_dir = tool_output_dir.resolve()
     configuration = json.loads(
         Path(config.agent_config_path).read_text(encoding="utf-8")
     )
@@ -75,7 +73,7 @@ def load_config(
             "env": environment,
             "cwd": str(REPO_ROOT),
         }
-    return load_model(config), servers
+    return servers
 
 
 async def create_agent(llm, mcp_servers) -> tuple[Any, Any]:
@@ -88,7 +86,7 @@ async def create_agent(llm, mcp_servers) -> tuple[Any, Any]:
         tools = await client.get_tools()
         agent = react_agent_factory(llm, tools)
         return agent, client
-    except Exception:
+    except BaseException:
         if hasattr(client, "close"):
             close_result = client.close()
             if hasattr(close_result, "__await__"):
@@ -142,6 +140,9 @@ async def handle_question(
     chat_log_path: Path,
     config: ExperimentConfig,
     plugins: list[AgentPlugin],
+    *,
+    plugin_lock: asyncio.Lock,
+    tool_output_dir: Path,
     logger=None,
 ) -> tuple[str, dict, list[dict]]:
     """Run one question and preserve all attempted calls, including failures."""
@@ -179,16 +180,18 @@ async def handle_question(
 
         full_query = f"{config.sys_prompt}\n\n{question_body}"
         metadata = {}
-        for plugin in plugins:
-            contribution = await plugin.before_question(question, base_query)
-            if contribution.text:
-                full_query += f"\n\n{contribution.text}"
-            for key, value in contribution.metadata.items():
-                if key in metadata:
-                    raise ValueError(f"Duplicate plugin metadata key: {key}")
-                metadata[key] = value
+        async with plugin_lock:
+            for plugin in plugins:
+                contribution = await plugin.before_question(question, base_query)
+                if contribution.text:
+                    full_query += f"\n\n{contribution.text}"
+                for key, value in contribution.metadata.items():
+                    if key in metadata:
+                        raise ValueError(f"Duplicate plugin metadata key: {key}")
+                    metadata[key] = value
         full_query += (
             "\n\n### Temporary Workspace\n"
+            f"This question's tool output directory is {tool_output_dir.resolve()}. "
             "The output directory is empty at the start of this question attempt. "
             "Generated files are deleted when the attempt ends. "
             "Use the original inputs and this attempt's tool outputs; recreate any "

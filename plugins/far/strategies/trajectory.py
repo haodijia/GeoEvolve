@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 from pathlib import Path
 from typing import Any, Callable, Optional
 
@@ -28,32 +28,21 @@ def _capture_question_messages(
     messages: list[dict], qid: str, first_attempt_only: bool
 ) -> tuple[list[dict], str, str]:
     question_messages: list[dict] = []
-    capturing = False
-    first_captured = False
     user_prompt = ""
     retrieved_context = ""
-
-    for msg in messages:
-        if msg.get("role") == "user" and isinstance(msg.get("metadata"), dict):
-            if str(msg["metadata"].get("question_id")) == qid:
-                if not first_attempt_only or not first_captured:
-                    capturing = True
-                    question_messages = []
-                    user_prompt = msg.get("content", "")
-                    retrieved_context = msg["metadata"].get("retrieved_context", "")
-                    first_captured = True
-                continue
-        if capturing and msg.get("name") == qid:
-            question_messages.append(msg)
-        elif capturing and msg.get("role") == "assistant":
-            question_messages.append(msg)
-        elif capturing and msg.get("role") in ("system", "tool"):
-            question_messages.append(msg)
-        elif capturing and msg.get("role") == "user":
-            capturing = False
-            if first_attempt_only:
+    captured = False
+    for message in messages:
+        if str(message["metadata"]["question_id"]) != qid:
+            continue
+        if message["role"] == "user":
+            if captured and first_attempt_only:
                 break
-
+            captured = True
+            question_messages = []
+            user_prompt = message["content"]
+            retrieved_context = message["metadata"].get("retrieved_context", "")
+        elif captured:
+            question_messages.append(message)
     return question_messages, user_prompt, retrieved_context
 
 

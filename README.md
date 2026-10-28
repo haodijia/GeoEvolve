@@ -40,6 +40,9 @@ bash scripts/run.sh --config configs/deepseek_v4flash_baseline.yaml --sample 10 
 # 基础 Earth-Agent
 bash scripts/run.sh --config configs/deepseek_v4flash_baseline.yaml
 
+# 同一个 run 内最多同时运行 4 道题
+bash scripts/run.sh --config configs/deepseek_v4flash_baseline.yaml --concurrency 4
+
 # 同一配置只加载 FAR，运行前 10 题
 bash scripts/run.sh --config configs/deepseek_v4flash_baseline.yaml --plugins far --sample 10
 
@@ -51,6 +54,8 @@ bash scripts/run.sh --config configs/deepseek_v4flash_baseline.yaml --plugins hk
 ```
 
 启动脚本按所选插件安装 HKG 的额外 Python 依赖。启用 HKG 前需准备[固定版本的 embedding 权重](plugins/hkg/models/README.md)。FAR 和基础 agent 不需要本地模型权重。
+
+`--concurrency N` 设置每个 run 的题目并发上限，省略时读取配置的 `concurrency`，默认 `1`。每题使用独立 agent 和 MCP 工具配置；结果完成后立即保存，按原题目顺序写入结果文件。
 
 `--datasets earthbench <另一个已注册的数据集名>` 顺序运行多个数据集；省略时使用配置中的列表。当前附带 EarthBench-Fixed。`--sample N` 选择每个数据集的前 N 题，`sample: null` 运行全部题目；超出数据集大小会报错。`--plugins` 覆盖插件列表，保留配置中同名插件的参数；新指定的内置插件使用自身默认参数。插件按列表顺序执行。
 
@@ -66,6 +71,8 @@ runs/earthbench_deepseek_20261028_103829/
     results.jsonl
     experiment_summary.json
     out/
+      question1/
+      question2/
     traces/
     plugins/
   evaluation/
@@ -76,7 +83,7 @@ runs/earthbench_deepseek_20261028_103829/
     state.json
 ```
 
-每题执行后保存记录并清空 `result/out/`；失败、超时和中断也执行清理。默认 `max_attempts: 1`，执行失败只记录，不自动重新跑题；模型 SDK 的隐式请求重试已关闭。`result/results.jsonl` 每题保存一条最终结果，`experiment_summary.json` 汇总实际成本。内部执行细节归入 `traces/`，插件状态归入 `plugins/`。
+每题使用独立的 `result/out/question<题号>/`，执行后保存记录并删除本题目录；失败、超时和中断也执行清理，不影响其他正在执行的题。默认 `max_attempts: 1`，执行失败只记录，不自动重新跑题；模型 SDK 的隐式请求重试已关闭。`result/results.jsonl` 每题保存一条最终结果，`experiment_summary.json` 汇总实际成本。内部执行细节归入 `traces/`，插件状态归入 `plugins/`。
 
 手动继续中断的 run，跳过已完成题目：
 
@@ -97,6 +104,7 @@ base_url: https://api.deepseek.com
 api_key_env: OPENAI_API_KEY
 datasets: [earthbench]
 sample: null
+concurrency: 1
 max_attempts: 1
 plugins:
   - name: hkg

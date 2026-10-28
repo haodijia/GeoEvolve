@@ -36,9 +36,11 @@ plugins:
 
 构造函数接收 `options`；有参数的组件应实现自己的构造函数并校验参数。生命周期：
 
-1. `setup(context)`：每个数据集的每次重复运行各调用一次，获得配置、该 run 的 `result/` 目录和 actor 模型。
-2. `before_question(question, query)`：返回附加提示词和日志元数据。不同组件不得写入同名元数据键。
+1. `setup(context)`：每个数据集的每个 run 调用一次，获得配置、该 run 的 `result/` 目录和 actor 模型。
+2. `before_question(question, query)`：返回附加提示词和日志元数据。所有题目的此钩子串行调用，保护共享组件状态；模型和工具调用按配置并发。不同组件不得写入同名元数据键，`question_id` 由运行器写入。
 3. `after_attempt(attempt, failed_results, chat_log_path)`：仅在存在失败题且还有下一轮时执行，返回 `prompt_tokens`、`completion_tokens`、`total_tokens` 三项用量。
+
+一轮中的所有题目执行完毕后，才调用 `after_attempt`。每条聊天记录带有题号，轨迹提取按题号筛选，支持交错日志。
 
 调用 `after_attempt` 前，actor 的 `result/out/` 中间文件已经清空。组件应读取保存的轨迹和工具返回值；需要持久保存的组件状态写入自己的 `result/plugins/<组件名>/` 目录。反思用于重试时，必须考虑中间文件需要从原始输入重新生成。
 

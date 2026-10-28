@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import os
+import re
 from dataclasses import asdict, dataclass, field, fields
 from pathlib import Path
 from typing import Any
-import os
-import re
 
 import yaml
 
@@ -69,6 +69,7 @@ class ExperimentConfig(ModelConfig):
     plugins: list[PluginConfig] = field(default_factory=list)
     autoplanning: bool = True
     sample: int | None = None
+    concurrency: int = 1
     max_attempts: int = 1
     sys_prompt: str = SYSTEM_PROMPT
     agent_config_path: str = "agent/mcp.json"
@@ -105,7 +106,7 @@ class ExperimentConfig(ModelConfig):
             raise ValueError("Each plugin must contain name and options")
         if len({item.name for item in self.plugins}) != len(self.plugins):
             raise ValueError("Duplicate plugins")
-        for name in ("max_attempts", "recursion_limit"):
+        for name in ("concurrency", "max_attempts", "recursion_limit"):
             if type(getattr(self, name)) is not int or getattr(self, name) < 1:
                 raise ValueError(f"{name} must be a positive integer")
         if self.sample is not None and (

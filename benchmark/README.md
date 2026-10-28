@@ -40,7 +40,7 @@ uv run --locked python -m benchmark.prepare --check
 
 版本锁固定 manifest 的 SHA-256，manifest 固定每个文件的大小与内容。重复运行下载命令会校验已有文件并仅下载缺失或不匹配的文件；校验失败则报错。`--revision <commit>` 可指定上传后的 ModelScope commit，仍须通过同一个内容版本锁。`--report /path/to/report.json` 可将校验报告写到数据集之外。
 
-运行路径统一相对于数据集根目录。`data/` 保存真实文件，`perception/masks/` 保存观测掩膜。输入只读；中间文件写入当前 run 的 `result/out/`，每题结束后清空。问题文件只包含 agent 输入，参考答案和轨迹单独保存在 `ground_truth.json`。
+运行路径统一相对于数据集根目录。`data/` 保存真实文件，`perception/masks/` 保存观测掩膜。输入只读；中间文件写入当前 run 的 `result/out/question<题号>/`，每题结束后删除本题目录。问题文件只包含 agent 输入，参考答案和轨迹单独保存在 `ground_truth.json`。
 
 问题 148/149 的年度夜光栅格来自固定统计量合成，问题 214 的三个掩膜由 SAM2.1 Hiera Small 重建。来源、原始问题与修复记录保存在 `provenance/`，所有方法使用同一数据版本和固定观测。
 

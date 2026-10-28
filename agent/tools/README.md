@@ -23,10 +23,12 @@ location. It must not already exist. Replay input paths are relocated to this
 isolated output directory; shared `tmp/out` is neither reused nor deleted.
 
 MCP servers are configured in `agent/mcp.json`. The runner supplies each
-run's `result/out/` directory and starts Python servers with its own interpreter.
-Questions execute sequentially. After each question attempt, including failures,
-the runner saves the answer and trajectory under `result/` and empties `result/out/`
-directory. Later questions and retries recreate required intermediate files.
+question's `result/out/question<id>/` directory and starts Python servers with its own interpreter.
+`concurrency` (or `--concurrency`) bounds simultaneous questions and defaults to 1.
+Each question gets an independent agent and MCP configuration. After each attempt,
+including failures, the runner saves its answer and trajectory under `result/`
+and removes only that question's output directory. Later attempts recreate
+required intermediate files.
 Evaluation and reflection read the recorded tool results, not those temporary files.
 
 ## Observation cache
