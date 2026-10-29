@@ -77,7 +77,7 @@ class RunContext:
             **dataset.protocol(),
             "question_ids": [
                 str(item["question_id"])
-                for item in dataset.load_questions(config.sample)
+                for item in dataset.load_questions(config.sample, config.question_ids)
             ],
         }:
             raise ValueError(
