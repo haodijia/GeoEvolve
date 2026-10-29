@@ -1,12 +1,15 @@
 import argparse
 import ast
 import csv
+import filecmp
+import itertools
 import os
 import re
 import shutil
 from pathlib import Path
 
 from fastmcp import FastMCP
+from utils import resolve_output_path
 
 import sys as _sys
 import functools as _functools
@@ -39,7 +42,7 @@ Parameters:
 Returns:
     str: Message indicating the file path where the result is saved.
 """)
-def threshold_segmentation(input_image_path, threshold, output_path):
+def threshold_segmentation(input_image_path: str, threshold: float, output_path: str):
     '''
     Perform threshold-based segmentation on a single-band raster image.
 
@@ -57,6 +60,7 @@ def threshold_segmentation(input_image_path, threshold, output_path):
     Returns:
         str: Message indicating the file path where the result is saved.
     '''
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -180,7 +184,7 @@ def count_above_threshold(file_path: str, threshold: float):
         >>> count_skeleton_contours("binary_mask.png")
         12
     """)
-def count_skeleton_contours(image_path):
+def count_skeleton_contours(image_path: str):
     """
     Description:
         Read a binary image, apply erosion and skeletonization, 
@@ -243,7 +247,7 @@ def count_skeleton_contours(image_path):
         >>> bboxes2centroids([[0, 0, 10, 20], [5, 5, 15, 15]])
         [(5.0, 10.0), (10.0, 10.0)]
     """)
-def bboxes2centroids(bboxes):
+def bboxes2centroids(bboxes: list[list[float]]):
     """
     Description:
         Convert bounding boxes from [x_min, y_min, x_max, y_max] format
@@ -288,7 +292,7 @@ def bboxes2centroids(bboxes):
         >>> centroid_distance_extremes(centroids)
         {'min': (0, 1, 5.0), 'max': (1, 2, 7.211102550927978)}
     """)
-def centroid_distance_extremes(centroids):
+def centroid_distance_extremes(centroids: list[list[float]]):
     """
     Description:
         Compute pairwise distances between centroids and return both the closest 
@@ -355,7 +359,7 @@ def centroid_distance_extremes(centroids):
         >>> calculate_bbox_area([[0, 0, 10, 20]], gsd=0.5)
         50.0
     """)
-def calculate_bbox_area(bboxes, gsd=None):
+def calculate_bbox_area(bboxes: list[list[float]], gsd: float | None=None):
     """
     Description:
         Calculate the total area of a list of bounding boxes in [x, y, w, h] format.
@@ -435,7 +439,7 @@ def _load_cache() -> list[dict[str, str]]:
                 f"Perception cache columns must be {sorted(required)}; "
                 f"got {reader.fieldnames}"
             )
-        _CACHE_ROWS = [dict(row) for row in reader]
+        _CACHE_ROWS = _expand_identical_images([dict(row) for row in reader])
     return _CACHE_ROWS
 
 
@@ -449,6 +453,48 @@ def _row_paths(value: str) -> tuple[str, ...]:
         parts = raw[1:-1].split(",", 1)
         return tuple(_normalize_path(part.strip()) for part in parts)
     return (_normalize_path(raw),)
+
+
+def _expand_identical_images(rows: list[dict[str, str]]) -> list[dict[str, str]]:
+    """Reuse recorded observations only for byte-identical cached input images."""
+    by_size: dict[int, list[str]] = {}
+    for path in sorted({path for row in rows for path in _row_paths(row["file_path"])}):
+        by_size.setdefault(Path(path).stat().st_size, []).append(path)
+
+    equivalents: dict[str, list[str]] = {}
+    for paths in by_size.values():
+        groups: list[list[str]] = []
+        for path in paths:
+            for group in groups:
+                if filecmp.cmp(path, group[0], shallow=False):
+                    group.append(path)
+                    break
+            else:
+                groups.append([path])
+        for group in groups:
+            for path in group:
+                equivalents[path] = group
+
+    def key(row):
+        bbox = row["bbox"].strip()
+        return (
+            _row_paths(row["file_path"]), row["model"],
+            _normalize_text(row["text_prompt"]),
+            str(ast.literal_eval(bbox)) if bbox else "",
+        )
+
+    expanded = list(rows)
+    known = {key(row) for row in rows}
+    for row in rows:
+        for paths in itertools.product(*(equivalents[path] for path in _row_paths(row["file_path"]))):
+            candidate = dict(row)
+            candidate["file_path"] = paths[0] if len(paths) == 1 else f"({paths[0]}, {paths[1]})"
+            candidate_key = key(candidate)
+            if candidate_key not in known:
+                candidate["source_file_path"] = row["file_path"]
+                expanded.append(candidate)
+                known.add(candidate_key)
+    return expanded
 
 
 def _decode(value: str):
@@ -533,11 +579,7 @@ def _copy_cached_artifact(cached_result, output_path: str) -> str:
     if not source.is_file():
         raise FileNotFoundError(f"Cached artifact not found: {source}")
 
-    relative_output = Path(output_path)
-    if relative_output.is_absolute() or ".." in relative_output.parts:
-        raise ValueError("output_path must be relative to the configured MCP temp directory")
-    destination = TEMP_DIR / relative_output
-    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination = Path(resolve_output_path(output_path, TEMP_DIR))
     shutil.copy2(source, destination)
     return f"Result save at {destination.resolve()}"
 
@@ -574,12 +616,14 @@ def InstructSAM(input_image_path: str, text_prompt: str):
 
 @mcp.tool(description="Copy a cached SAM2 segmentation mask to the requested output path.")
 def SAM2(input_image_path: str, bboxes: list[list[float]], output_path: str):
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     result = _lookup("SAM2", input_image_path, bbox=bboxes)
     return _copy_cached_artifact(result, output_path)
 
 
 @mcp.tool(description="Copy a cached ChangeOS change mask to the requested output path.")
 def ChangeOS(pre_image_path: str, post_image_path: str, output_path: str):
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     result = _lookup(
         "ChangeOS",
         pre_image_path,

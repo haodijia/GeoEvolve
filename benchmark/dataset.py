@@ -89,7 +89,9 @@ class Dataset:
                 )
         return value
 
-    def load_questions(self, limit: int | None = None) -> list[dict]:
+    def load_questions(
+        self, limit: int | None = None, question_ids: list[str] | None = None
+    ) -> list[dict]:
         module, function = self.metadata["loader"].split(":", 1)
         questions = getattr(import_module(module), function)(self.path("questions"))
         if not isinstance(questions, list) or not questions:
@@ -107,6 +109,15 @@ class Dataset:
             ids.append(str(question["question_id"]))
         if len(set(ids)) != len(ids):
             raise ValueError(f"Duplicate question IDs in {self.name}")
+        if question_ids is not None:
+            if limit is not None:
+                raise ValueError("Use either sample or question_ids")
+            if not question_ids or len(set(question_ids)) != len(question_ids):
+                raise ValueError("question_ids must be nonempty and unique")
+            unknown = set(question_ids) - set(ids)
+            if unknown:
+                raise ValueError(f"Unknown question IDs: {sorted(unknown)}")
+            questions = [q for q in questions if str(q["question_id"]) in question_ids]
         if limit is not None and limit > len(questions):
             raise ValueError(
                 f"Requested {limit} questions, but {self.name} has {len(questions)}"

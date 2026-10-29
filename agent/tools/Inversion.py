@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from fastmcp import FastMCP
 
-from utils import read_image, read_image_uint8
+from utils import read_image, read_image_uint8, resolve_output_path
 
 
 import sys as _sys
@@ -126,8 +126,6 @@ def _dispatch_path_batch(tool, *, fixed: dict | None = None, **paths):
 
     def invoke(values):
         arguments = dict(zip(names, values))
-        if "output_path" in arguments:
-            arguments["output_path"] = arguments["output_path"].lstrip("/")
         return tool.fn(**arguments, **fixed)
 
     with ThreadPoolExecutor(max_workers=min(8, len(rows))) as executor:
@@ -174,6 +172,8 @@ def band_ratio(
     sur_refl_b19_path: str | list[str],
     output_path: str | list[str]
 ) -> str | list[str]:
+    if isinstance(output_path, str):
+        output_path = resolve_output_path(output_path, TEMP_DIR)
     batch = _dispatch_path_batch(
         band_ratio,
         sur_refl_b02_path=sur_refl_b02_path,
@@ -297,6 +297,8 @@ def lst_single_channel(
     nir_path: str | list[str],
     output_path: str | list[str]
 ) -> str | list[str]:
+    if isinstance(output_path, str):
+        output_path = resolve_output_path(output_path, TEMP_DIR)
     batch = _dispatch_path_batch(
         lst_single_channel,
         bt_path=bt_path,
@@ -404,6 +406,8 @@ def lst_multi_channel(
     band32_path: str | list[str],
     output_path: str | list[str]
 ) -> str | list[str]:
+    if isinstance(output_path, str):
+        output_path = resolve_output_path(output_path, TEMP_DIR)
     batch = _dispatch_path_batch(
         lst_multi_channel,
         band31_path=band31_path,
@@ -504,6 +508,8 @@ def split_window(
     parameter: str,
     output_path: str | list[str]
 ) -> str | list[str]:
+    if isinstance(output_path, str):
+        output_path = resolve_output_path(output_path, TEMP_DIR)
     batch = _dispatch_path_batch(
         split_window,
         fixed={"parameter": parameter},
@@ -683,6 +689,7 @@ def temperature_emissivity_separation(
         ... )
         'Result saved at question17/lst_2022-01-16.tif'
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -776,6 +783,8 @@ def modis_day_night_lst(
     Emis_night_path: str | list[str],
     output_path: str | list[str]
 ) -> str | list[str]:
+    if isinstance(output_path, str):
+        output_path = resolve_output_path(output_path, TEMP_DIR)
     batch = _dispatch_path_batch(
         modis_day_night_lst,
         BT_day_path=BT_day_path,
@@ -943,6 +952,7 @@ def ttm_lst(
         ... )
         'Result saved at question17/lst_2022-01-16.tif'
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1116,7 +1126,7 @@ Parameters:
 Returns:
     float: Maximum LST value over the selected NDVI region. Returns np.nan if no valid data.
 ''')
-def calculate_max_lst_by_ndvi(red_path, nir_path, lst_path, ndvi_threshold, mode='above'):
+def calculate_max_lst_by_ndvi(red_path: str, nir_path: str, lst_path: str, ndvi_threshold: float, mode: str='above'):
     """
     Calculate the maximum Land Surface Temperature (LST) in areas where NDVI is above or below a given threshold.
 
@@ -1189,6 +1199,8 @@ def ATI(
     albedo_path: str | list[str],
     output_path: str | list[str]
 ) -> str | list[str]:
+    if isinstance(output_path, str):
+        output_path = resolve_output_path(output_path, TEMP_DIR)
     batch = _dispatch_path_batch(
         ATI,
         day_temp_path=day_temp_path,
@@ -1338,6 +1350,7 @@ def dual_polarization_differential(
     Returns:
         str: Path to the exported parameter GeoTIFF.
     '''
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1440,6 +1453,7 @@ def dual_frequency_diff(
     Returns:
         str: Path to the saved combined output GeoTIFF (difference and parameter).
     '''
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1533,6 +1547,7 @@ def multi_freq_bt(
     Returns:
         str: Path to the saved inverted parameter GeoTIFF.
     '''
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1650,6 +1665,7 @@ def chang_single_param_inversion(
     Returns:
         str: File path to saved GeoTIFF with inverted parameter band.
     '''
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1744,7 +1760,7 @@ Returns:
     str: Path to saved GeoTIFF with sea ice concentration band.
 """)
 def nasa_team_sea_ice_concentration(
-    bt_paths: dict,
+    bt_paths: dict[str, str],
     output_path: str,
     nd_ice: float = 50.0,
     nd_water: float = 0.0,
@@ -1771,6 +1787,7 @@ def nasa_team_sea_ice_concentration(
     Returns:
         str: Path to saved GeoTIFF with sea ice concentration band.
     '''
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1851,10 +1868,10 @@ Returns:
     str: File path of the saved GeoTIFF containing the inverted parameter and PR band.
 """)
 def dual_polarization_ratio(
-    bt_paths: dict,
+    bt_paths: dict[str, str],
     parameter: str,
     output_path: str,
-    coeffs: dict | None = None
+    coeffs: dict[str, float] | None = None
 ) -> str:
     '''
     Estimate Vegetation Water Content (VWC) or Soil Moisture (SM) using Dual-Polarization Ratio Method (PRM) from local passive microwave brightness temperature GeoTIFF files.
@@ -1878,6 +1895,7 @@ def dual_polarization_ratio(
     Returns:
         str: File path of the saved GeoTIFF containing the inverted parameter and PR band.
     '''
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1970,6 +1988,7 @@ def calculate_water_turbidity_ntu(
     Returns:
         str: Path to the output NTU raster file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np

@@ -6,6 +6,7 @@ import asyncio
 import inspect
 import json
 import shutil
+from collections import Counter
 from pathlib import Path
 from typing import Any
 
@@ -105,7 +106,7 @@ async def run_single_attempt(
             try:
                 servers = load_tool_servers(config, tool_output_dir, dataset)
                 agent, client = await create_agent(llm, servers)
-                answer, usage, calls = await handle_question(
+                outcome = await handle_question(
                     agent,
                     question,
                     chat_log_path,
@@ -116,20 +117,22 @@ async def run_single_attempt(
                     attempt=attempt,
                     logger=logger,
                 )
-                has_issue, reasons = heuristic_critic_has_issue(answer)
+                has_issue, reasons = heuristic_critic_has_issue(outcome.answer)
                 results[qid] = {
                     "question_id": question["question_id"],
                     "attempt": attempt,
-                    "answer": answer,
-                    "execution_error": answer.startswith(
-                        f"Error processing question {qid}:"
-                    ),
-                    "agent_response": answer,
+                    "answer": outcome.answer,
+                    "status": outcome.status,
+                    "finish_reason": outcome.finish_reason,
+                    "execution_error": outcome.status in {
+                        "empty_response", "step_limit", "token_limit", "timeout", "execution_error"
+                    },
+                    "agent_response": outcome.answer,
                     "heuristic_issue": has_issue,
                     "heuristic_reasons": reasons,
                     "heuristic_success": not has_issue,
-                    "token_usage": usage,
-                    "tool_calls": calls,
+                    "token_usage": outcome.token_usage,
+                    "tool_calls": outcome.tool_calls,
                     "tool_output_dir": str(tool_output_dir.resolve()),
                 }
                 persist()
@@ -237,6 +240,8 @@ def _save_summary(
             question.update(
                 answer=record["answer"],
                 execution_error=record["execution_error"],
+                status=record["status"],
+                finish_reason=record["finish_reason"],
                 tool_calls=record["tool_calls"],
             )
             question["cumulative_tool_calls"].extend(record["tool_calls"])
@@ -254,6 +259,7 @@ def _save_summary(
             "total_questions": len(questions),
             "evaluated_questions": len(final),
             "execution_errors": sum(item["execution_error"] for item in final.values()),
+            "status_counts": dict(Counter(item["status"] for item in final.values())),
             "token_usage": {
                 "actor": costs["question_answering_tokens"],
                 "plugins": costs["plugin_generation_tokens"],
@@ -273,7 +279,7 @@ async def run_experiment(
     resume_through_attempt: int = 1,
 ) -> Path:
     """Store one execution in result/ and its evaluation beside it."""
-    questions = dataset.load_questions(config.sample)
+    questions = dataset.load_questions(config.sample, config.question_ids)
     workspaces = [
         question_workspace(Path("."), str(question["question_id"]))
         for question in questions

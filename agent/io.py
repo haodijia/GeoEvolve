@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import uuid
 from datetime import datetime
 from logging.handlers import RotatingFileHandler
@@ -63,11 +64,12 @@ def create_experiment_logger(
 ) -> logging.Logger:
     """Create a per-experiment file logger that writes JSON records.
 
-    Produces ``{model_name}_{AP|IF}_langchain.log`` inside *output_dir*, one
+    Produces ``{safe_model_name}_{AP|IF}_langchain.log`` inside *output_dir*, one
     JSON object per line, for the current runner.
     """
     mode_tag = "AP" if autoplanning else "IF"
-    log_path = Path(output_dir) / f"{model_name}_{mode_tag}_langchain.log"
+    safe_model_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", model_name)
+    log_path = Path(output_dir) / f"{safe_model_name}_{mode_tag}_langchain.log"
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger_name = f"agent.experiment.{log_path.stem}.{id(log_path)}"

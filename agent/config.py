@@ -35,6 +35,7 @@ class ModelConfig:
     request_timeout: float = 120.0
     temperature: float = 0.1
     generate_args: dict[str, Any] = field(default_factory=dict)
+    preserve_reasoning: bool = False
 
     def __post_init__(self) -> None:
         if not isinstance(self.model_name, str) or not self.model_name.strip():
@@ -47,6 +48,8 @@ class ModelConfig:
             raise ValueError("request_timeout must be positive")
         if not isinstance(self.generate_args, dict):
             raise ValueError("generate_args must be a mapping")
+        if type(self.preserve_reasoning) is not bool:
+            raise ValueError("preserve_reasoning must be a boolean")
 
     def resolve_api_key(self) -> str:
         value = os.environ.get(self.api_key_env, "")
@@ -69,6 +72,7 @@ class ExperimentConfig(ModelConfig):
     plugins: list[PluginConfig] = field(default_factory=list)
     autoplanning: bool = True
     sample: int | None = None
+    question_ids: list[str] | None = None
     concurrency: int = 1
     langsmith: bool = False
     max_attempts: int = 1
@@ -118,6 +122,16 @@ class ExperimentConfig(ModelConfig):
             raise ValueError(
                 "sample must be null (all questions) or a positive integer"
             )
+        if self.question_ids is not None:
+            if (
+                not isinstance(self.question_ids, list)
+                or not self.question_ids
+                or any(not isinstance(qid, str) or not qid for qid in self.question_ids)
+                or len(set(self.question_ids)) != len(self.question_ids)
+            ):
+                raise ValueError("question_ids must be a nonempty list of unique strings")
+            if self.sample is not None:
+                raise ValueError("Use either sample or question_ids")
         if self.request_timeout <= 0 or self.question_timeout <= 0:
             raise ValueError("Timeouts must be positive")
 

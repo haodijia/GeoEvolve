@@ -5,21 +5,22 @@ from __future__ import annotations
 import asyncio
 import json
 import sys
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from agent.answers import extract_answer_from_response
+from agent.answers import extract_answer_from_response, extract_tagged_answer
 from agent.config import ExperimentConfig, ModelConfig
 from agent.io import save_chat_message
-from agent.tokens import message_token_usage
+from agent.tokens import ModelUsageRecorder
+from agent.model import (
+    ProviderChatOpenAI,
+    capture_async_response,
+    capture_sync_response,
+    record_model_calls,
+)
 from benchmark.dataset import REPO_ROOT, Dataset
 from plugins.base import AgentPlugin
-
-
-def _chat_openai_class() -> Any:
-    from langchain_openai import ChatOpenAI
-
-    return ChatOpenAI
 
 
 def _mcp_and_react_factories() -> tuple[Any, Any]:
@@ -30,18 +31,25 @@ def _mcp_and_react_factories() -> tuple[Any, Any]:
 
 
 def load_model(config: ModelConfig) -> Any:
+    import httpx
+
     kwargs = {
         "model": config.model_name,
         "api_key": config.resolve_api_key(),
         "temperature": config.temperature,
         "request_timeout": config.request_timeout,
         "max_retries": 0,
+        "preserve_reasoning": config.preserve_reasoning,
+        "http_client": httpx.Client(event_hooks={"response": [capture_sync_response]}),
+        "http_async_client": httpx.AsyncClient(
+            event_hooks={"response": [capture_async_response]}
+        ),
     }
     if config.base_url:
         kwargs["base_url"] = config.base_url
     if config.generate_args:
         kwargs["extra_body"] = config.generate_args
-    return _chat_openai_class()(**kwargs)
+    return ProviderChatOpenAI(**kwargs)
 
 
 def load_tool_servers(
@@ -102,17 +110,6 @@ def _log_info(logger: Any | None, *args: Any) -> None:
         info_fn(*args)
 
 
-def extract_token_usage_from_response(response: dict) -> dict[str, int]:
-    totals = {"prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0}
-    for message in response["messages"]:
-        if message.type != "ai":
-            continue
-        usage = message_token_usage(message)
-        for key in totals:
-            totals[key] += usage[key]
-    return totals
-
-
 def extract_tool_calls_from_response(response: dict) -> list[dict]:
     calls: list[dict] = []
     pending: dict[str, dict] = {}
@@ -134,6 +131,15 @@ def extract_tool_calls_from_response(response: dict) -> list[dict]:
     return calls
 
 
+@dataclass
+class QuestionOutcome:
+    answer: str
+    token_usage: dict
+    tool_calls: list[dict]
+    status: str
+    finish_reason: str | None
+
+
 async def handle_question(
     agent,
     question: dict,
@@ -145,12 +151,14 @@ async def handle_question(
     tool_output_dir: Path,
     attempt: int,
     logger=None,
-) -> tuple[str, dict, list[dict]]:
+) -> QuestionOutcome:
     """Run one question and preserve all attempted calls, including failures."""
 
     qid_str = str(question["question_id"])
     response = {"messages": []}
     failure = None
+    status = "completed"
+    usage_recorder = ModelUsageRecorder()
 
     try:
         data_str = (
@@ -179,7 +187,7 @@ async def handle_question(
             )
             question_body += f"\n\n### Options\n{choices_text}"
 
-        full_query = f"{config.sys_prompt}\n\n{question_body}"
+        full_query = question_body
         metadata = {}
         async with plugin_lock:
             for plugin in plugins:
@@ -200,15 +208,21 @@ async def handle_question(
         )
         save_chat_message(chat_log_path, "user", full_query, qid_str, metadata=metadata)
 
-        from langchain_core.messages import HumanMessage
+        from langchain_core.messages import HumanMessage, SystemMessage
 
         async def invoke() -> None:
             nonlocal response
             async for state in agent.astream(
-                {"messages": [HumanMessage(content=full_query)]},
+                {
+                    "messages": [
+                        SystemMessage(content=config.sys_prompt),
+                        HumanMessage(content=full_query),
+                    ]
+                },
                 config={
                     "recursion_limit": config.recursion_limit,
                     "run_name": f"question{qid_str}/attempt_{attempt}",
+                    "callbacks": [usage_recorder],
                     "metadata": {
                         "question_id": qid_str,
                         "attempt": attempt,
@@ -219,9 +233,19 @@ async def handle_question(
             ):
                 response = state
 
-        await asyncio.wait_for(invoke(), timeout=config.question_timeout)
+        with record_model_calls(
+            Path(chat_log_path).parent / "traces" / "model_calls", qid_str, attempt
+        ):
+            await asyncio.wait_for(invoke(), timeout=config.question_timeout)
         final_answer = extract_answer_from_response(response)
+        if not final_answer.strip():
+            status = "empty_response"
+        elif final_answer == "Sorry, need more steps to process this request.":
+            status = "step_limit"
+        elif not extract_tagged_answer(final_answer):
+            status = "format_error"
     except Exception as error:
+        status = "timeout" if isinstance(error, asyncio.TimeoutError) else "execution_error"
         failure = (
             f"Error processing question {qid_str}: {type(error).__name__}: {error}"
         )
@@ -237,7 +261,9 @@ async def handle_question(
     calls = extract_tool_calls_from_response(response)
     conversation_log = []
     for message in response["messages"]:
-        if message.type == "human":
+        if message.type == "system":
+            conversation_log.append({"role": "system", "content": message.content})
+        elif message.type == "human":
             conversation_log.append({"role": "user", "content": message.content})
         elif message.type == "ai":
             content = []
@@ -247,7 +273,11 @@ async def handle_question(
                 content.append(
                     {"id": call["id"], "name": call["name"], "input": call["args"]}
                 )
-            conversation_log.append({"role": "assistant", "content": content})
+            conversation_log.append({
+                "role": "assistant", "content": content,
+                "reasoning_content": message.additional_kwargs.get("reasoning_content"),
+                "response_metadata": message.response_metadata,
+            })
             save_chat_message(
                 chat_log_path,
                 "assistant",
@@ -264,7 +294,10 @@ async def handle_question(
                     ],
                 ],
                 qid_str,
-                metadata=None,
+                metadata={
+                    "reasoning_content": message.additional_kwargs.get("reasoning_content"),
+                    "response_metadata": message.response_metadata,
+                },
             )
         elif message.type == "tool":
             conversation_log.append(
@@ -304,4 +337,10 @@ async def handle_question(
         conversation_log,
         final_answer,
     )
-    return final_answer, extract_token_usage_from_response(response), calls
+    finish_reason = (
+        usage_recorder.messages[-1].response_metadata.get("finish_reason")
+        if usage_recorder.messages else None
+    )
+    if status in {"empty_response", "format_error"} and finish_reason == "length":
+        status = "token_limit"
+    return QuestionOutcome(final_answer, usage_recorder.totals(), calls, status, finish_reason)

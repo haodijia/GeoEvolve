@@ -1,0 +1,23 @@
+model_label: qwen36_27b
+model_name: /data/pub/models/Qwen3.6-27B
+base_url: http://127.0.0.1:18000/v1
+api_key_env: OPENAI_API_KEY
+preserve_reasoning: true
+request_timeout: 1800
+question_timeout: 3600
+temperature: 1.0
+generate_args:
+  top_p: 0.95
+  top_k: 20
+  chat_template_kwargs:
+    enable_thinking: true
+autoplanning: true
+datasets:
+- earthbench
+sample: null
+concurrency: 1
+langsmith: true
+max_attempts: 1
+plugins: []
+agent_config_path: agent/mcp.json
+output_base_dir: runs

@@ -299,7 +299,9 @@ def _relocate_outputs(value: object, output_dir: Path):
     return value
 
 
-async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
+async def _validate(
+    work_dir: Path, replay_ground_truth: bool = False, question_ids: list[str] | None = None
+) -> int:
     work_dir.mkdir(parents=True, exist_ok=False)
     manifest = json.loads(DATASET.path("manifest").read_text(encoding="utf-8"))
     report = {
@@ -388,6 +390,12 @@ async def _validate(work_dir: Path, replay_ground_truth: bool = False) -> int:
         print(f"Validated {checked_calls} EarthBench GT calls against MCP schemas")
 
         if replay_ground_truth:
+            if question_ids is not None:
+                selected = {f"question{qid}" for qid in question_ids}
+                known = {question["question_index"] for question in ground_truth}
+                if selected - known:
+                    raise ValueError(f"Unknown reference questions: {sorted(selected - known)}")
+                ground_truth = [q for q in ground_truth if q["question_index"] in selected]
             replay_failures = []
             replayed = 0
             for question_index, question in enumerate(ground_truth, start=1):
@@ -507,12 +515,16 @@ def main() -> None:
     )
     parser.add_argument("--work-dir", type=Path, default=REPO_ROOT / "tmp" / "mcp-validation" / datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
     parser.add_argument("--replay-ground-truth", action="store_true")
+    parser.add_argument("--question-ids", nargs="+", help="Limit reference replay to these question IDs")
     args = parser.parse_args()
+    if args.question_ids is not None and not args.replay_ground_truth:
+        parser.error("--question-ids requires --replay-ground-truth")
     raise SystemExit(
         asyncio.run(
             _validate(
                 args.work_dir.resolve(),
                 replay_ground_truth=args.replay_ground_truth,
+                question_ids=args.question_ids,
             )
         )
     )

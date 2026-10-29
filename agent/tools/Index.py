@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from fastmcp import FastMCP
 
-from utils import read_image, read_image_uint8
+from utils import read_image, read_image_uint8, resolve_output_path
 
 import sys as _sys
 import functools as _functools
@@ -34,6 +34,7 @@ def _calculate_ndvi(input_nir_path, input_red_path, output_path):
     Returns:
         str: Path to the saved NDVI file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -119,6 +120,7 @@ def _calculate_ndwi(input_nir_path, input_swir_path, output_path):
     Returns:
         str: Path to the saved NDWI file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -204,6 +206,7 @@ def calculate_ndbi(input_swir_path, input_nir_path, output_path):
     Returns:
         str: Path to the saved NDBI file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -291,6 +294,7 @@ def  calculate_evi(input_nir_path, input_red_path, input_blue_path, output_path,
         L (float, optional): Adjustment factor. Defaults to 1.
 
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -391,6 +395,7 @@ def _calculate_nbr(input_nir_path, input_swir_path, output_path):
     Returns:
         str: Path to the saved NBR file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -480,6 +485,7 @@ def calculate_fvc(input_nir_path, input_red_path, output_path, ndvi_min=0.1, ndv
     Returns:
         str: Path to the saved FVC raster file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -580,6 +586,7 @@ def calculate_wri(input_green_path, input_red_path, input_nir_path, input_swir_p
     Returns:
         str: Path to the saved WRI raster file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -682,6 +689,7 @@ def _calculate_ndti(input_red_path, input_green_path, output_path):
     Returns:
         str: Path to the saved NDTI file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -769,6 +777,7 @@ def calculate_frp(input_frp_path, output_path, fire_threshold=0):
     Returns:
         str: Path to the saved fire mask file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -852,6 +861,7 @@ def calculate_ndsi(input_green_path: str, input_swir_path: str, output_path: str
     Returns:
         str: Path to the output NDSI raster file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1051,12 +1061,12 @@ def _compute_tvdi_single(
         ... )
         'Result saved at question17/tvdi_2022-01-16.tif'
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
     from scipy.stats import linregress
 
-    output_path = output_path.lstrip("/")
 
     # Read NDVI and LST
     with rasterio.open(ndvi_path) as src_ndvi:
@@ -1161,6 +1171,8 @@ def compute_tvdi(
     lst_path: str | list[str],
     output_path: str | list[str],
 ) -> str | list[str]:
+    if isinstance(output_path, str):
+        output_path = resolve_output_path(output_path, TEMP_DIR)
     values = (ndvi_path, lst_path, output_path)
     list_flags = tuple(isinstance(value, list) for value in values)
     if any(list_flags) and not all(list_flags):

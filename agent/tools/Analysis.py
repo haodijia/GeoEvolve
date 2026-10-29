@@ -2,7 +2,7 @@ import argparse
 
 from pathlib import Path
 from fastmcp import FastMCP
-from utils import read_image, read_image_uint8, write_image
+from utils import read_image, read_image_uint8, write_image, resolve_output_path
 
 
 import sys as _sys
@@ -45,7 +45,7 @@ The coefficient a — represents the trend.
     • intercept (float):
 The y-intercept b of the fitted line.
 ''')
-def compute_linear_trend(y: list, x: list|None = None):
+def compute_linear_trend(y: list[float], x: list[float] | None = None):
     '''
     Description
 
@@ -105,7 +105,7 @@ Returns:
 - z (float): Standard normal test statistic.
 - tau (float): Kendall’s Tau statistic (rank correlation, between -1 and 1).
 ''')
-def mann_kendall_test(x: list):
+def mann_kendall_test(x: list[float]):
     """
     Description:
         Conduct the Mann-Kendall trend test on a time series to assess
@@ -194,7 +194,7 @@ Returns:
 - slopes (list[float]): List of all individual pairwise slopes, 
                         useful for optional further analysis.
 ''')
-def sens_slope(x: list):
+def sens_slope(x: list[float]):
     """
     Description:
         Compute Sen’s Slope estimator for a univariate time series.
@@ -255,7 +255,7 @@ Returns:
     * "resid" (list[float]): Residual (remainder) component.
 ''')
 def stl_decompose(
-    x: list, 
+    x: list[float],
     period: int, 
     robust: bool = True
 ):
@@ -323,7 +323,7 @@ Returns:
 - change_points (list[int]): Indices where change points are detected. 
                              Includes the last index of the signal by default.
 ''')
-def detect_change_points(signal, model="l2", penalty=10):
+def detect_change_points(signal: list[float], model: str="l2", penalty: float=10):
     """
     Description:
         Detect change points in a one-dimensional time series using the 
@@ -375,7 +375,7 @@ Returns:
 - acf (list[float]): List of autocorrelation values from lag 0 up to lag `nlags`. 
                      Value at lag 0 is always 1.0.
 ''')
-def autocorrelation_function(x: list, nlags: int = 20):
+def autocorrelation_function(x: list[float], nlags: int = 20):
     """
     Description:
         Compute the Autocorrelation Function (ACF) of a univariate time series.
@@ -430,7 +430,7 @@ Returns:
     * Dominant period (lag) as an integer if a significant seasonal cycle is detected.
     * "Data is not cyclical" if no significant seasonality is found.
 ''')
-def detect_seasonality_acf(values: list, min_acf: float = 0.3):
+def detect_seasonality_acf(values: list[float], min_acf: float = 0.3):
     """
     Description:
         Detect the dominant seasonality (cycle length) in a univariate time series
@@ -504,7 +504,7 @@ Returns:
        Output raster has the same dimensions as the input image, 
        with float32 values representing local Gi* scores.
 ''')
-def getis_ord_gi_star(image_path: str, weight_matrix: list, output_path: str) -> str:
+def getis_ord_gi_star(image_path: str, weight_matrix: list[list[float]], output_path: str) -> str:
     """
     Description:
         Compute the Getis-Ord Gi* statistic for a single-band raster image 
@@ -537,6 +537,7 @@ def getis_ord_gi_star(image_path: str, weight_matrix: list, output_path: str) ->
         ... )
         'Result save at outputs/gi_star_ndvi.tif'
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import numpy as np
     import rasterio
     from scipy.ndimage import convolve
@@ -680,7 +681,7 @@ def analyze_hotspot_direction(hotspot_map_path: str) -> str:
         >>> count_spikes_from_values([0.1, 0.15, 0.5, 0.55], spike_threshold=0.2)
         1
     """)
-def count_spikes_from_values(values, spike_threshold=0.1, verbose=True):
+def count_spikes_from_values(values: list[float | None], spike_threshold: float=0.1, verbose: bool=True):
     """
     Count the number of upward spikes in a sequence of numerical values.
 

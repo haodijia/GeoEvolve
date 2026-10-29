@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from fastmcp import FastMCP
 
-from utils import read_image, read_image_uint8, write_image
+from utils import read_image, read_image_uint8, write_image, resolve_output_path
 
 import sys as _sys
 import functools as _functools
@@ -47,7 +47,7 @@ Parameters:
 Returns:
 - cv (float): Coefficient of Variation. Returns NaN if mean == 0.
 ''')
-def coefficient_of_variation(x: list, ddof: int = 1):
+def coefficient_of_variation(x: list[float], ddof: int = 1):
     """
     Description:
         Compute the Coefficient of Variation (CV) for a dataset.
@@ -97,7 +97,7 @@ Returns:
     * Negative skew → long left tail
     * Zero skew → symmetric distribution
 ''')
-def skewness(x: list, bias: bool = True):
+def skewness(x: list[float], bias: bool = True):
     """
     Description:
         Compute the skewness of a dataset, which quantifies the asymmetry of its 
@@ -163,7 +163,7 @@ Returns:
     * Negative → light-tailed relative to normal distribution.
     * Zero → same tailedness as normal distribution (if fisher=True).
 ''')
-def kurtosis(x: list, bias: bool = True, fisher: bool = True):
+def kurtosis(x: list[float], bias: bool = True, fisher: bool = True):
     """
     Description:
         Compute the kurtosis of a dataset, which quantifies the tailedness 
@@ -775,6 +775,7 @@ def calc_single_image_hotspot_tif(file_path: str, threshold: float, output_path:
     Returns:
         str: Path to the saved GeoTIFF image containing the binary map.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import numpy as np
 
     image = read_image_uint8(file_path) if uint8 else read_image(file_path)
@@ -994,7 +995,7 @@ Returns:
     * max_value (float): The maximum value in the list.
     * max_index (int): The index of the maximum value.
 ''')
-def max_value_and_index(x: list):
+def max_value_and_index(x: list[float]):
     '''
     Description:
     Find the maximum value in a list and return both the maximum value and its index.
@@ -1028,7 +1029,7 @@ Returns:
     * min_value (float): The minimum value in the list.
     * min_index (int): The index of the minimum value.
 ''')
-def min_value_and_index(x: list):
+def min_value_and_index(x: list[float]):
     '''
     Description:
     Find the minimum value in a list and return both the minimum value and its index.
@@ -1071,7 +1072,7 @@ def min_value_and_index(x: list):
         >>> multiply(2.5, 4)
         10.0
     """)
-def multiply(a, b):
+def multiply(a: float, b: float):
     """
     Description:
         Multiply two numbers and return their product.
@@ -1156,7 +1157,7 @@ def ceil_number(n: float):
         >>> get_list_object_via_indexes(['a', 'b', 'c', 'd'], [1, 3])
         ['b', 'd']
     """)
-def get_list_object_via_indexes(input_list, indexes):
+def get_list_object_via_indexes(input_list: list, indexes: list[int]):
     """
     Description:
         Retrieve elements from a list using a list or tuple of indices.
@@ -1195,7 +1196,7 @@ def get_list_object_via_indexes(input_list, indexes):
         >>> mean([1, 2, 3, 4, 5])
         3.0
     """)
-def mean(x: list):
+def mean(x: list[float]):
     """
     Description:
         Compute the arithmetic mean (average) of a dataset.
@@ -1401,6 +1402,7 @@ def create_fire_increase_map(change_image_path: str, output_path: str, threshold
         >>> create_fire_increase_map("fire_change.tif", "output/fire_increase.tif", threshold=25.0)
         'Result save at /tmp/output/fire_increase.tif'
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1473,6 +1475,7 @@ def identify_fire_prone_areas(file_path: str, output_path: str, threshold_percen
         >>> identify_fire_prone_areas("hotspot_map.tif", "output/fire_prone.tif", 80)
         ('Result save at /tmp/output/fire_prone.tif', 123.45)
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -1611,7 +1614,7 @@ def get_percentile_value_from_image(
         >>> image_division_mean("image1.tif", "image2.tif")
         0.876
     """)
-def image_division_mean(image_path1, image_path2=None, band1=1, band2=2):
+def image_division_mean(image_path1: str, image_path2: str | None=None, band1: int=1, band2: int=2):
     """
     Description:
         Calculate the mean of pixel-wise division between two images 
@@ -1683,7 +1686,7 @@ def image_division_mean(image_path1, image_path2=None, band1=1, band2=2):
         >>> calculate_intersection_percentage("ndvi.tif", 0.3, "tvdi.tif", 0.7)
         12.54
     """)
-def calculate_intersection_percentage(path1, threshold1, path2, threshold2):
+def calculate_intersection_percentage(path1: str, threshold1: float, path2: str, threshold2: float):
     """
     Description:
         Calculate the percentage of pixels that simultaneously satisfy 
@@ -2058,7 +2061,7 @@ def calc_batch_image_mean_threshold(
     """)
 def calculate_multi_band_threshold_ratio(
     image_path: str,
-    band_conditions: list
+    band_conditions: list[list[int | float | str]]
 ) -> float:
     """
     Description:
@@ -2144,7 +2147,7 @@ def calculate_multi_band_threshold_ratio(
     """)
 def count_pixels_satisfying_conditions(
     image_path: str,
-    band_conditions: list
+    band_conditions: list[list[int | float | str]]
 ) -> int:
     """
     Description:
@@ -2651,81 +2654,72 @@ def calculate_band_mean_by_condition(
     return float(mean_value)
 
 
-@mcp.tool(description=
-    """
-    Calculate the mean value of corresponding raster pixels in path2 
-    where the raster values in path1 exceed the given threshold.
-
-    Parameters:
-        path1 (Path or List[Path]): Path(s) to the first set of raster files (e.g., LST).
-        path2 (Path or List[Path]): Path(s) to the second set of raster files (e.g., TVDI).
-        threshold (float): Threshold for values in path1 (e.g., LST in Kelvin).
-
-    Returns:
-        float: Mean value of path2 pixels that meet the threshold condition in path1.
-               Returns np.nan if no valid data is found.
-    """)
+@mcp.tool(description="""
+Compute the pixel-weighted mean of path2 where path1 exceeds threshold.
+Pass two scalar paths, or two nonempty lists matched by acquisition date.
+Filenames must contain YYYY-MM-DD or YYYY_MM_DD, optionally followed by HHMM.
+Condition dates require exactly one target each; unused target dates are ignored.
+Raster grids must match. Nodata and nonfinite pixels are excluded; target values
+are not restricted to 0..1. Invalid pairs or zero valid pixels raise an error.
+""")
 def calc_threshold_value_mean(
     path1: str | list[str],
     path2: str | list[str],
-    threshold: float = 300.0
-) -> float | None:
-    """
-    Calculate the mean value of corresponding raster pixels in path2 
-    where the raster values in path1 exceed the given threshold.
-
-    Parameters:
-        path1 (Path or List[Path]): Path(s) to the first set of raster files (e.g., LST).
-        path2 (Path or List[Path]): Path(s) to the second set of raster files (e.g., TVDI).
-        threshold (float): Threshold for values in path1 (e.g., LST in Kelvin).
-
-    Returns:
-        float: Mean value of path2 pixels that meet the threshold condition in path1.
-               Returns np.nan if no valid data is found.
-    """
+    threshold: float = 300.0,
+) -> float:
+    """Average target pixels selected by paired condition rasters."""
     import re
+    from datetime import datetime
     import rasterio
     import numpy as np
-    
 
-    # Ensure inputs are lists of Path objects
-    files1 = [Path(path1)] if isinstance(path1, (str, Path)) else [Path(p) for p in path1]
-    files2 = [Path(path2)] if isinstance(path2, (str, Path)) else [Path(p) for p in path2]
+    if isinstance(path1, str) and isinstance(path2, str):
+        pairs = [(Path(path1), Path(path2))]
+    elif isinstance(path1, list) and isinstance(path2, list):
+        pattern = re.compile(r"(?<!\d)(\d{4})[-_](\d{2})[-_](\d{2})(?!\d)(?:[_-](\d{4})(?!\d))?")
 
-    # Extract timestamp from filenames using regex (e.g., 2023_05_01_1045)
-    pattern = re.compile(r"\d{4}_\d{2}_\d{2}_\d{4}")
+        def index(paths):
+            if not paths:
+                raise ValueError("Raster lists must not be empty")
+            result = {}
+            for value in paths:
+                path = Path(value)
+                match = pattern.search(path.stem)
+                if match is None:
+                    raise ValueError(f"No acquisition date in {path.name!r}")
+                year, month, day, time = match.groups()
+                key = f"{year}-{month}-{day}" + (f"_{time}" if time else "")
+                datetime.strptime(key, "%Y-%m-%d_%H%M" if time else "%Y-%m-%d")
+                if key in result:
+                    raise ValueError(f"Ambiguous acquisition date {key}: {result[key]}, {path}")
+                result[key] = path
+            return result
 
-    # Create dictionaries with timestamp as key and path as value
-    dict1 = {pattern.search(f.name).group(): f for f in files1 if pattern.search(f.name)}
-    dict2 = {pattern.search(f.name).group(): f for f in files2 if pattern.search(f.name)}
+        conditions, targets = index(path1), index(path2)
+        missing = set(conditions) - set(targets)
+        if missing:
+            raise ValueError(f"No target raster for condition dates: {sorted(missing)}")
+        pairs = [(path, targets[key]) for key, path in sorted(conditions.items())]
+    else:
+        raise ValueError("path1 and path2 must both be strings or both be lists")
 
-    matched_keys = set(dict1.keys()) & set(dict2.keys())
-
-    if not matched_keys:
-        print("No matched file pairs found.")
-        return None
-
-    all_vals = []
-
-    for key in sorted(matched_keys):
-        file1 = dict1[key]
-        file2 = dict2[key]
-
+    total, count = 0.0, 0
+    for file1, file2 in pairs:
         with rasterio.open(file1) as ds1, rasterio.open(file2) as ds2:
-            data1 = ds1.read(1).astype(np.float32)
-            data2 = ds2.read(1).astype(np.float32)
-
-            # Apply mask: values in data1 must exceed threshold and be valid
-            mask = (data1 > threshold) & (data1 > 0) & (data2 >= 0) & (data2 <= 1)
-
-            if np.any(mask):
-                all_vals.extend(data2[mask].flatten())
-
-    if not all_vals:
-        print("No valid values found for path1 > threshold.")
-        return None
-
-    return float(np.mean(all_vals))
+            if ds1.shape != ds2.shape or ds1.crs != ds2.crs or ds1.transform != ds2.transform:
+                raise ValueError(f"Raster grids differ: {file1}, {file2}")
+            condition = ds1.read(1, masked=True).astype(np.float64)
+            target = ds2.read(1, masked=True).astype(np.float64)
+            mask = (
+                ~np.ma.getmaskarray(condition) & ~np.ma.getmaskarray(target)
+                & np.isfinite(condition.data) & np.isfinite(target.data)
+                & (condition.data > threshold)
+            )
+            total += float(target.data[mask].sum(dtype=np.float64))
+            count += int(mask.sum())
+    if count == 0:
+        raise ValueError(f"No valid target pixels where path1 > {threshold}")
+    return total / count
 
 
 @mcp.tool(description="""
@@ -2751,6 +2745,7 @@ def calculate_tif_average(file_list: list[str], output_path: str, uint8: bool = 
     Returns:
         output_path (str): Full path of output file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import numpy as np
 
     if not file_list:
@@ -2800,6 +2795,7 @@ def calculate_tif_difference(image_a_path: str, image_b_path: str, output_path: 
     Returns:
         output_path (str): Full path of output file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import numpy as np
 
     image_a = read_image(image_a_path)
@@ -2842,6 +2838,7 @@ def subtract(img1_path: str, img2_path: str, output_path: str) -> str:
     Returns:
         str: Path to output file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import numpy as np
     import rasterio
@@ -2874,7 +2871,7 @@ Parameters:
 Returns:
     area (int): The area of non-zero pixels in the input image.
 """)
-def calculate_area(input_image_path, gsd):
+def calculate_area(input_image_path: str, gsd: float | None):
     '''
     Description:
     This function calculates the area of non-zero pixels in the input image and returns the result.
@@ -2905,6 +2902,7 @@ def grayscale_to_colormap(image_path: str, save_name: str, cmap_name: str = 'vir
         cmap_name (str): Name of a matplotlib colormap, e.g. 'viridis', 'RdBu', etc.
         preserve_geo (bool): If True, preserves georeferencing.
     """
+    save_name = resolve_output_path(save_name, TEMP_DIR)
     import numpy as np
     import rasterio
     import cv2
@@ -2960,7 +2958,7 @@ Parameters:
 Returns:
     str: Path to the saved corrected reflectance file.
 """)
-def radiometric_correction_sr(input_band_path, output_path):
+def radiometric_correction_sr(input_band_path: str, output_path: str):
     """
     Apply Landsat 8 surface reflectance (SR_B*) radiometric correction.
 
@@ -2971,6 +2969,7 @@ def radiometric_correction_sr(input_band_path, output_path):
     Returns:
         str: Path to the saved corrected reflectance file.
     """
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np
@@ -3013,7 +3012,7 @@ Parameters:
 Returns:
     str: Path to the saved masked raster file.
 """)
-def apply_cloud_mask(sr_band_path, qa_pixel_path, output_path):
+def apply_cloud_mask(sr_band_path: str, qa_pixel_path: str, output_path: str):
     """
     Apply cloud/shadow mask to a single Landsat 8 surface reflectance band using QA_PIXEL band.
 
@@ -3026,6 +3025,7 @@ def apply_cloud_mask(sr_band_path, qa_pixel_path, output_path):
         str: Path to the saved masked raster file.
     """
     # Bitmask for bits 0-4: Fill, Dilated Cloud, Cirrus, Cloud, Cloud 
+    output_path = resolve_output_path(output_path, TEMP_DIR)
     import os
     import rasterio
     import numpy as np

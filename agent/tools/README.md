@@ -9,6 +9,7 @@ uv sync --locked
 uv run --locked python -m benchmark.prepare
 uv run --locked python -m scripts.validate_mcp_tools
 uv run --locked python -m scripts.validate_mcp_tools --replay-ground-truth
+uv run --locked python -m scripts.validate_mcp_tools --replay-ground-truth --question-ids 69 70 184
 ```
 
 The first validator command checks all 1,331 reference-call schemas and invokes
@@ -45,7 +46,19 @@ fixture. No replacement detector or runtime inference is attempted.
 
 The released snapshot contains the fixed observation cache, masks, and their
 provenance under its `provenance/` directory. Runtime setup uses these verified
-assets directly.
+assets directly. On cache load, inputs are compared byte for byte (without file
+hashes); existing observations are expanded to identical images under other
+recorded paths. The pinned snapshot gains seven exact query combinations this
+way. Model, prompt, bounding boxes, and input order are preserved; recorded keys
+are never overwritten. Tool descriptions and per-question prompts are unchanged.
+
+Numeric and array parameters have explicit JSON schema types. Output paths may
+be relative to the question workspace or absolute within it; paths outside the
+workspace are rejected. `calc_threshold_value_mean` pairs lists by acquisition
+date (`YYYY-MM-DD` or `YYYY_MM_DD`, optionally with `HHMM`), requires a unique
+target for every condition date, and reports invalid pairs or no valid pixels
+as errors. Its pixel-weighted mean excludes nodata/nonfinite pixels and accepts
+targets outside 0..1, including LST values.
 
 ## Reference-tool inventory
 

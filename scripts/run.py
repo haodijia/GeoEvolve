@@ -33,6 +33,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--sample", type=int, help="Questions per dataset; omit to use the config"
     )
+    parser.add_argument("--question-ids", nargs="+", help="Run only these question IDs")
     parser.add_argument(
         "--concurrency", type=int, help="Concurrent questions per run; default: config"
     )
@@ -69,7 +70,7 @@ def build_parser() -> argparse.ArgumentParser:
 def resolve_config(args: argparse.Namespace) -> ExperimentConfig:
     config = ExperimentConfig.from_yaml(args.config)
     updates = {}
-    for key in ("datasets", "sample", "concurrency", "langsmith"):
+    for key in ("datasets", "sample", "question_ids", "concurrency", "langsmith"):
         if getattr(args, key) is not None:
             updates[key] = getattr(args, key)
     if args.plugins is not None:
@@ -86,7 +87,8 @@ async def run_experiments(args: argparse.Namespace, config: ExperimentConfig) ->
     create_plugins(config.plugins)
     # Resolve every dataset before starting the first model request.
     selections = {
-        dataset.name: dataset.load_questions(config.sample) for dataset in datasets
+        dataset.name: dataset.load_questions(config.sample, config.question_ids)
+        for dataset in datasets
     }
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     destinations = {

@@ -87,6 +87,10 @@ runs/earthbench_deepseek_20261028_103829/
 
 每题使用独立的 `result/out/question<题号>/`，执行后保存记录并删除本题目录；失败、超时和中断也执行清理，不影响其他正在执行的题。默认 `max_attempts: 1`，执行失败只记录，不自动重新跑题；模型 SDK 的隐式请求重试已关闭。`result/results.jsonl` 每题保存一条最终结果，`experiment_summary.json` 汇总实际成本。内部执行细节归入 `traces/`，插件状态归入 `plugins/`。
 
+通用指令通过独立的 `system` 消息传入；题目、数据路径、选项、插件补充和临时目录放在 `user` 消息中。每轮调用保留该题的系统消息和历史记录，各题会话独立。`run.chat` 记录题目输入及执行轨迹，通用指令保存在配置快照的 `sys_prompt` 中，结构化会话日志和 LangSmith 记录实际消息角色。
+
+模型调用的实际请求与原始 HTTP 响应正文保存在 `result/traces/model_calls/question<题号>.jsonl`，不记录认证请求头。Qwen 思考模型需设置 `preserve_reasoning: true`，将服务返回的 reasoning 保留并通过 `reasoning_content` 传回当前题目的工具调用历史。结果的 `status` 区分 `completed`、`empty_response`、`format_error`、`step_limit`、`token_limit`、`timeout` 和 `execution_error`；汇总中的 `status_counts` 记录各类数量。空正文不会当成正常作答，不自动重试或从 reasoning 中猜测答案。
+
 手动继续中断的 run，跳过已完成题目：
 
 ```bash

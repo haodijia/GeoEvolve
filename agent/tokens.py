@@ -4,6 +4,8 @@ import json
 from pathlib import Path
 from typing import Any
 
+from langchain_core.callbacks import AsyncCallbackHandler
+
 TOKEN_FIELDS = ("prompt_tokens", "completion_tokens", "total_tokens")
 
 
@@ -19,6 +21,28 @@ def message_token_usage(message: Any) -> dict[str, int]:
     if result["total_tokens"] != result["prompt_tokens"] + result["completion_tokens"]:
         raise ValueError(f"Inconsistent token usage: {result}")
     return result
+
+
+class ModelUsageRecorder(AsyncCallbackHandler):
+    """Count actual model responses before the agent replaces any messages."""
+
+    def __init__(self) -> None:
+        self.messages: list[Any] = []
+
+    async def on_llm_end(self, response: Any, **kwargs: Any) -> None:
+        self.messages.extend(
+            generation.message
+            for generations in response.generations
+            for generation in generations
+        )
+
+    def totals(self) -> dict[str, int]:
+        total = dict.fromkeys(TOKEN_FIELDS, 0)
+        for message in self.messages:
+            usage = message_token_usage(message)
+            for key in TOKEN_FIELDS:
+                total[key] += usage[key]
+        return total
 
 
 def sum_usage_ledger(path: Path) -> dict[str, int]:

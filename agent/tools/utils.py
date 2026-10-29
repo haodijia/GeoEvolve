@@ -7,6 +7,17 @@ import rasterio
 from affine import Affine
 
 
+def resolve_output_path(output_path: str, temp_dir: Path) -> str:
+    """Resolve a relative or absolute path inside this invocation's workspace."""
+    root = temp_dir.resolve()
+    path = Path(output_path)
+    destination = (path if path.is_absolute() else root / path).resolve()
+    if destination == root or not destination.is_relative_to(root):
+        raise ValueError(f"Output must be a file inside {root}: {output_path!r}")
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    return str(destination)
+
+
 def read_image(file_path: str) -> np.ndarray:
     with rasterio.open(file_path) as source:
         image = source.read()
