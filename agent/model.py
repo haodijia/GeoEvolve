@@ -90,7 +90,7 @@ class ProviderChatOpenAI(ChatOpenAI):
                 if isinstance(message, AIMessage):
                     reasoning = message.additional_kwargs.get("reasoning_content")
                     if reasoning is not None:
-                        outgoing["reasoning_content"] = reasoning
+                        outgoing["reasoning"] = reasoning
         return payload
 
     def _create_chat_result(self, response: Any, generation_info=None):
@@ -98,8 +98,8 @@ class ProviderChatOpenAI(ChatOpenAI):
         result = super()._create_chat_result(response, generation_info)
         for generation, choice in zip(result.generations, raw["choices"]):
             message = choice["message"]
-            # vLLM 0.19 uses `reasoning`; Qwen's template consumes
-            # `reasoning_content` for assistant messages within a tool turn.
+            # vLLM uses `reasoning` on the wire and maps it to
+            # `reasoning_content` for Qwen's chat template.
             for field in ("reasoning", "reasoning_content"):
                 if message.get(field) is not None:
                     generation.message.additional_kwargs["reasoning_content"] = message[field]
