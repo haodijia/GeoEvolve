@@ -443,8 +443,62 @@ def _load_cache() -> list[dict[str, str]]:
     return _CACHE_ROWS
 
 
+_PROMPT_SYNONYMS = {
+    "airplane": ("airplanes", "plane", "planes", "aircraft", "aeroplane", "aeroplanes"),
+    "baseball diamond": ("baseball diamonds", "baseball field", "baseball fields"),
+    "basketball court": ("basketball courts", "basketball field", "basketball fields"),
+    "tennis court": ("tennis courts",),
+    "soccer ball field": (
+        "soccer ball fields", "soccer field", "soccer fields", "soccer pitch",
+        "soccer pitches", "football field", "football fields", "football pitch",
+        "football pitches",
+    ),
+    "ground track field": (
+        "ground track fields", "athletics track", "athletics tracks",
+        "running track", "running tracks", "track and field",
+    ),
+    "storage tank": ("storage tanks",),
+    "small vehicle": ("small vehicles",),
+    "large vehicle": ("large vehicles",),
+    "vehicle": ("vehicles",),
+    "ship": ("ships", "vessel", "vessels"),
+    "swimming pool": ("swimming pools", "pool", "pools"),
+    "harbor": ("harbors", "harbour", "harbours", "port", "ports"),
+    "bridge": ("bridges",),
+    "roundabout": ("roundabouts", "traffic circle", "traffic circles"),
+}
+_PROMPT_ALIASES = {
+    alias: canonical
+    for canonical, aliases in _PROMPT_SYNONYMS.items()
+    for alias in (canonical, *aliases)
+}
+_PROMPT_ALIAS_PATTERN = re.compile(
+    r"\b(?:" + "|".join(
+        re.escape(alias) for alias in sorted(_PROMPT_ALIASES, key=len, reverse=True)
+    ) + r")\b"
+)
+
+
 def _normalize_text(value: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", value.lower()))
+
+
+def _normalize_prompt(value: str) -> str:
+    """Canonicalize synonymous target classes while retaining their qualifiers."""
+    text = _normalize_text(value)
+    text = _PROMPT_ALIAS_PATTERN.sub(lambda match: _PROMPT_ALIASES[match[0]], text)
+    text = re.sub(r"^(?:a|an|the)\s+", "", text)
+    for direction, adjective in (
+        ("west", "westernmost"), ("east", "easternmost"),
+        ("north", "northernmost"), ("south", "southernmost"),
+    ):
+        text = re.sub(rf"\b(?:furthest|farthest) {direction}\b", adjective, text)
+        text = re.sub(
+            rf"\b(?:(?:located|situated) )?(?:on|in|at) (?:the )?{adjective} (?:side|position)\b",
+            adjective,
+            text,
+        )
+    return text
 
 
 def _row_paths(value: str) -> tuple[str, ...]:
@@ -528,11 +582,11 @@ def _lookup(
         raise LookupError(f"No cached {model} result for {expected_paths}")
 
     if text_prompt:
-        prompt = _normalize_text(text_prompt)
+        prompt = _normalize_prompt(text_prompt)
         prompt_matches = [
             row
             for row in candidates
-            if _normalize_text(row.get("text_prompt", "")) == prompt
+            if _normalize_prompt(row.get("text_prompt", "")) == prompt
         ]
         if not prompt_matches:
             raise LookupError(
@@ -559,12 +613,13 @@ def _lookup(
             )
         candidates = bbox_matches
 
-    if len(candidates) != 1:
+    results = [_decode(row["result"]) for row in candidates]
+    if any(result != results[0] for result in results[1:]):
         raise LookupError(
             f"Cached {model} lookup is ambiguous for {expected_paths}; "
-            f"matched {len(candidates)} rows"
+            f"matched {len(candidates)} rows with different results"
         )
-    return _decode(candidates[0]["result"])
+    return results[0]
 
 
 def _copy_cached_artifact(cached_result, output_path: str) -> str:
