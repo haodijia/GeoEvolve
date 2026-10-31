@@ -2,7 +2,7 @@
 
 The benchmark exposes the official 104 local MCP tools across Analysis, Index, Inversion,
 Perception, and Statistics. CPU raster operations use Rasterio. Perception reads
-the released CSV/masks plus a reviewed frozen patch. Evaluation uses only offline
+the released, consolidated CSV and masks. Evaluation uses only offline
 observations and requires no GPU model service. See [cache repair](../../docs/perception-cache-repair.md).
 
 ```bash
@@ -13,10 +13,10 @@ uv run --locked python -m scripts.validate_mcp_tools --replay-ground-truth
 uv run --locked python -m scripts.validate_mcp_tools --replay-ground-truth --question-ids 69 70 184
 ```
 
-The first validator command checks all 1,331 reference-call schemas and invokes
+The first validator command checks all published reference-call schemas and invokes
 all 104 tools on generated fixtures, without requiring benchmark imagery. The
 full replay additionally checks source-file flow, executes all 248 reference
-trajectories, and invokes all 461 real cached observations. A missing asset,
+trajectories, and invokes all 569 real cached observations. A missing asset,
 invalid schema, or failed call makes validation fail.
 
 Each invocation writes its outputs and `validation.json` into a new directory
@@ -54,24 +54,7 @@ these parameters without exposing per-question cache contents or vocabulary.
 No cache miss is interpreted as zero objects. RemoteSAM preserves referring
 conditions and never selects an arbitrary box from ambiguous observations.
 
-`benchmark/earthbench/perception/observations.csv` contains 461 observations: MSCN 172, RemoteCLIP 172,
-SM3Det 57, InstructSAM 24, RemoteSAM 10, SAM2 9, and ChangeOS 17. The pinned dataset
-contains all 26 referenced masks. `EARTH_BENCH_PERCEPTION_CACHE` explicitly selects a
-different CSV; normal benchmark runs use the pinned cache.
-
-Offline lookups require a recorded image, prompt, and bounding boxes. Unknown requests
-raise an error. Strip-R-CNN has no observations in the released CSV; reviewed ship
-observations are supplied by the patch. Only reviewed, frozen observations are
-added to the released cache. Raw outputs from previous service experiments are
-not read by evaluation.
-
-The default patch is `earthbench_perception_patch/observations.json` beside the
-resolved dataset directory. `EARTH_BENCH_PERCEPTION_PATCH` selects another patch.
-The patch retains model provenance and review decisions. Original observations
-are preserved; conflicting additions fail at load time. Unknown prompts remain
-errors. Offline matching never calls a model, changes agent-visible prompts, or
-uses answers to select a cached result. Image paths, tool, normalized prompt,
-bounding boxes and paired-image order all remain part of the lookup key.
+`benchmark/earthbench/perception/observations.csv` contains 569 frozen observations, including reviewed supplements. Referenced masks ship in the same dataset. `EARTH_BENCH_PERCEPTION_CACHE` selects another CSV; normal evaluation uses the pinned release. External patch loading and service calls have been removed. Unknown requests remain errors. See the repair document for model provenance and review boundaries.
 
 The released snapshot contains the fixed observation cache, masks, and their
 provenance under its `provenance/` directory. Runtime setup uses these verified

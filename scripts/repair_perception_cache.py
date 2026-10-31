@@ -18,7 +18,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from agent.perception_prompts import condition_signature, normalize_prompt
-from agent.perception_patch import equivalent_results
+from agent.perception_observations import equivalent_results
 
 RUNS = [
     "earthbench_qwen36_27b_vllm020_native_20261029_212157",

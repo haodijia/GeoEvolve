@@ -442,22 +442,6 @@ def _load_cache() -> list[dict[str, str]]:
                 f"got {reader.fieldnames}"
             )
         rows = [dict(row) for row in reader]
-    from agent.perception_patch import equivalent_results, patch_rows
-
-    def observation_key(row):
-        return (_row_paths(row["file_path"]), row["model"],
-                _normalize_prompt(row["text_prompt"]),
-                repr(ast.literal_eval(row["bbox"])) if row["bbox"].strip() else "")
-
-    known = {observation_key(row): row for row in rows}
-    for row in patch_rows():
-        identity = observation_key(row)
-        if identity in known:
-            if not equivalent_results(_decode(known[identity]["result"]), _decode(row["result"])):
-                raise ValueError(f"Conflicting perception patch observation: {identity}")
-            continue
-        rows.append(row)
-        known[identity] = row
     _CACHE_ROWS = _expand_identical_images(rows)
     return _CACHE_ROWS
 
@@ -560,7 +544,7 @@ def _lookup(
         )
 
     results = [_decode(row["result"]) for row in candidates]
-    from agent.perception_patch import equivalent_results
+    from agent.perception_observations import equivalent_results
     if any(not equivalent_results(result, results[0]) for result in results[1:]):
         raise LookupError(
             f"Cached {model} lookup is ambiguous for {expected_paths}; "

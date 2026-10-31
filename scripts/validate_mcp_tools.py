@@ -4,6 +4,7 @@ import argparse
 import asyncio
 import csv
 import json
+import math
 import os
 import shutil
 import sys
@@ -22,6 +23,7 @@ from rasterio.transform import from_origin
 REPO_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(REPO_ROOT))
 from benchmark.dataset import Dataset
+from benchmark.reference_answers import verify_answer, verify_release
 DATASET = Dataset.load("earthbench")
 SERVER_NAMES = ("Analysis", "Index", "Inversion", "Perception", "Statistics")
 
@@ -290,13 +292,45 @@ def _validate_ground_truth_files(ground_truth: list[dict]) -> None:
 
 
 def _relocate_outputs(value: object, output_dir: Path):
-    if isinstance(value, str) and value.startswith("tmp/out/"):
-        return str(output_dir / value.removeprefix("tmp/out/"))
+    if isinstance(value, str):
+        return value.replace("tmp/out/", str(output_dir) + "/")
     if isinstance(value, list):
         return [_relocate_outputs(item, output_dir) for item in value]
     if isinstance(value, dict):
         return {key: _relocate_outputs(item, output_dir) for key, item in value.items()}
     return value
+
+
+def _same_output(actual, expected) -> bool:
+    """Compare the recorded result, including numeric values and nested arrays."""
+    if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
+        return math.isclose(actual, expected, rel_tol=1e-6, abs_tol=1e-7)
+    if isinstance(actual, list) and isinstance(expected, list):
+        return len(actual) == len(expected) and all(
+            _same_output(a, b) for a, b in zip(actual, expected)
+        )
+    if isinstance(actual, dict) and isinstance(expected, dict):
+        return actual.keys() == expected.keys() and all(
+            _same_output(actual[k], expected[k]) for k in actual
+        )
+    return actual == expected
+
+
+def _returned_value(result):
+    structured = result.structuredContent
+    if structured is not None:
+        if set(structured) == {"result"}:
+            return structured["result"]
+        return structured
+    values = []
+    for item in result.content:
+        value = getattr(item, "text", repr(item))
+        try:
+            value = json.loads(value)
+        except (ValueError, TypeError):
+            pass
+        values.append(value)
+    return values[0] if len(values) == 1 else values
 
 
 async def _validate(
@@ -370,6 +404,16 @@ async def _validate(
         ))
         if replay_ground_truth:
             _validate_ground_truth_files(ground_truth)
+            report["answer_review"] = verify_release(DATASET.root)
+            answer_reviews = {
+                item["question_index"]: item for item in json.loads(
+                    (DATASET.root / "provenance/answer-review.json").read_text()
+                )
+            }
+            reviewed_questions = {
+                "question" + str(item["question_id"]): item
+                for item in json.loads(DATASET.path("questions").read_text())
+            }
         schema_failures = []
         checked_calls = 0
         for question in ground_truth:
@@ -403,6 +447,7 @@ async def _validate(
                 question_output_dir.mkdir(parents=True)
                 question_record = {"question_index": question["question_index"], "calls": [], "passed": False}
                 report["questions"].append(question_record)
+                actual_calls = []
                 for call_index, call in enumerate(question["tool_calls"], start=1):
                     replayed += 1
                     try:
@@ -441,7 +486,24 @@ async def _validate(
                             )
                         )
                         break
+                    expected_output = _relocate_outputs(call["output"], question_output_dir)
+                    actual_output = _returned_value(result)
+                    if not _same_output(actual_output, expected_output):
+                        replay_failures.append((question["question_index"], call_index,
+                                                call["name"], "output differs from published reference"))
+                        question_record["calls"][-1].update(
+                            expected=expected_output, actual=actual_output, output_matches=False
+                        )
+                        save_report()
+                        break
+                    question_record["calls"][-1]["output_matches"] = True
+                    actual_calls.append({**call, "output": actual_output})
                 else:
+                    question_record["answer_evidence"] = verify_answer(
+                        reviewed_questions[question["question_index"]],
+                        {**question, "tool_calls": actual_calls},
+                        answer_reviews[question["question_index"]],
+                    )
                     question_record["passed"] = True
                     shutil.rmtree(question_output_dir)
                     save_report()

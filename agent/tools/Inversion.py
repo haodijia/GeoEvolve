@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from fastmcp import FastMCP
 
-from utils import read_image, read_image_uint8, resolve_output_path
+from utils import read_band, read_aligned, read_image, read_image_uint8, resolve_output_path
 
 
 import sys as _sys
@@ -59,9 +59,9 @@ def _dispatch_path_batch(tool, *, fixed: dict | None = None, **paths):
         from rasterio.warp import reproject
 
         with rasterio.open(inputs[0]) as reference:
-            first = reference.read().astype(np.float32)
-            if reference.nodata is not None:
-                first[first == reference.nodata] = np.nan
+            first = reference.read(masked=True).astype(np.float32).filled(np.nan)
+            first = first * np.asarray(reference.scales)[:, None, None]
+            first += np.asarray(reference.offsets)[:, None, None]
             arrays = [first]
             profile = reference.profile.copy()
             reference_transform = reference.transform
@@ -70,14 +70,17 @@ def _dispatch_path_batch(tool, *, fixed: dict | None = None, **paths):
 
         for path in inputs[1:]:
             with rasterio.open(path) as source:
+                decoded = source.read(masked=True).astype(np.float32).filled(np.nan)
+                decoded = decoded * np.asarray(source.scales)[:, None, None]
+                decoded += np.asarray(source.offsets)[:, None, None]
                 destination = np.full(reference_shape, np.nan, dtype=np.float32)
                 for band_index in range(reference_shape[0]):
                     reproject(
-                        source=rasterio.band(source, band_index + 1),
+                        source=decoded[band_index],
                         destination=destination[band_index],
                         src_transform=source.transform,
                         src_crs=source.crs,
-                        src_nodata=source.nodata,
+                        src_nodata=np.nan,
                         dst_transform=reference_transform,
                         dst_crs=reference_crs,
                         dst_nodata=np.nan,
@@ -690,61 +693,38 @@ def temperature_emissivity_separation(
         'Result saved at question17/lst_2022-01-16.tif'
     """
     output_path = resolve_output_path(output_path, TEMP_DIR)
-    import os
-    import rasterio
     import numpy as np
+    from utils import write_image
 
-    # Constants
-    c2 = 1.43877e4       # Second radiation constant (μm·K)
-    wavelength = 10.6    # Representative band central wavelength (μm)
-
-    # Step 1: Read representative band
-    with rasterio.open(tir_band_paths[representative_band_index]) as src:
-        rep_band = src.read(1).astype(np.float32)
-        profile = src.profile.copy()
-        valid_mask = (rep_band > 0) & (rep_band < 1000)
-
-    # Step 2: Read all bands
-    bands_data = []
-    for path in tir_band_paths:
-        with rasterio.open(path) as src:
-            band = src.read(1).astype(np.float32)
-            band[~valid_mask] = np.nan
-            bands_data.append(band)
-
-    bands_stack = np.stack(bands_data, axis=0)
-
-    # Step 3: Compute Δε
-    masked_stack = np.ma.masked_invalid(bands_stack)
-    band_max = np.ma.max(masked_stack, axis=0).filled(np.nan)
-    band_min = np.ma.min(masked_stack, axis=0).filled(np.nan)
-    delta_epsilon = band_max - band_min
-
-    # Step 4: Estimate emissivity
-    emissivity = 0.982 - 0.072 * delta_epsilon
-    emissivity = np.clip(emissivity, 0.85, 0.999)
-
-    # Step 5: Calculate LST
-    Tb = bands_stack[representative_band_index]
-    Tb[~valid_mask] = np.nan
-    valid_calc = (Tb > 0) & (emissivity > 0) & (~np.isnan(Tb)) & (~np.isnan(emissivity))
-    lst = np.full_like(Tb, np.nan)
-    lst[valid_calc] = Tb[valid_calc] / (1 + (wavelength * Tb[valid_calc] / c2) * np.log(emissivity[valid_calc]))
-
-    # Step 6: Output stack
-    out_stack = np.stack([lst, emissivity, delta_epsilon], axis=0).astype(np.float32)
-    profile.update(dtype=rasterio.float32, count=3, compress='lzw', nodata=np.nan)
-
-    out_full_path = TEMP_DIR / output_path
-    os.makedirs(out_full_path.parent, exist_ok=True)
-
-    with rasterio.open(out_full_path, 'w', **profile) as dst:
-        dst.write(out_stack)
-        dst.set_band_description(1, "LST (K)")
-        dst.set_band_description(2, "Emissivity (ε)")
-        dst.set_band_description(3, "Emissivity Variation (Δε)")
-
-    return f'Result saved at {out_full_path}'
+    if not 2 <= len(tir_band_paths) <= 5 or not 0 <= representative_band_index < len(tir_band_paths):
+        raise ValueError("Require 2..5 ordered ASTER thermal bands and a valid representative index")
+    reference = tir_band_paths[representative_band_index]
+    bands = np.stack([read_aligned(path, reference) for path in tir_band_paths])
+    if bands.ndim != 3:
+        raise ValueError("TES inputs must be single-band brightness temperatures")
+    valid = np.all(np.isfinite(bands) & (bands > 0) & (bands < 1000), axis=0)
+    bands[:, ~valid] = np.nan
+    wavelengths = np.asarray([8.3, 8.65, 9.1, 10.6, 11.3][:len(tir_band_paths)])[:, None, None]
+    c1, c2 = 1.191042e8, 1.4387752e4
+    with np.errstate(divide="ignore", invalid="ignore", over="ignore"):
+        radiance = c1 / (wavelengths**5 * np.expm1(c2 / (wavelengths * bands)))
+        nem_temperature = np.max(c2 / (wavelengths * np.log1p(c1 * .99 / (wavelengths**5 * radiance))), axis=0)
+        blackbody = c1 / (wavelengths**5 * np.expm1(c2 / (wavelengths * nem_temperature)))
+        nem_emissivity = radiance / blackbody
+        beta = nem_emissivity / np.mean(nem_emissivity, axis=0)
+        # TES MMD empirical relationship (Gillespie et al., 1998); beta and epsilon are dimensionless.
+        minimum_emissivity = .994 - .687 * np.ptp(beta, axis=0)**.737
+        emissivities = beta * minimum_emissivity / np.min(beta, axis=0)
+        physical = valid & (minimum_emissivity > 0) & np.all((emissivities > 0) & (emissivities <= 1), axis=0)
+        rep = representative_band_index
+        wavelength = float(wavelengths[rep, 0, 0])
+        lst = c2 / (wavelength * np.log1p(c1 * emissivities[rep] / (wavelength**5 * radiance[rep])))
+        emissivity = np.mean(emissivities, axis=0)
+        delta_epsilon = np.ptp(emissivities, axis=0)
+    output = np.stack([lst, emissivity, delta_epsilon], axis=-1)
+    output[~physical] = np.nan
+    write_image(output_path, output, reference, dtype="float32", nodata=np.nan)
+    return f'Result saved at {output_path}'
 
 
 
@@ -1258,8 +1238,8 @@ def ATI(
         from rasterio.enums import Resampling
         from rasterio.warp import reproject
 
-        destination = np.empty(
-            (ref_profile["height"], ref_profile["width"]), dtype=np.float32
+        destination = np.full(
+            (ref_profile["height"], ref_profile["width"]), np.nan, dtype=np.float32
         )
         reproject(
             source=src_data,
@@ -1268,19 +1248,22 @@ def ATI(
             src_crs=src_profile["crs"],
             dst_transform=ref_profile["transform"],
             dst_crs=ref_profile["crs"],
+            src_nodata=np.nan,
+            dst_nodata=np.nan,
             resampling=Resampling.bilinear,
         )
         return destination
 
     # Read raster data
     with rasterio.open(day_temp_path) as src_day:
-        BT_day = src_day.read(1).astype(np.float32)
+        BT_day = src_day.read(1, masked=True).astype(np.float32).filled(np.nan)
         day_profile = src_day.profile
     with rasterio.open(night_temp_path) as src_night:
-        BT_night = src_night.read(1).astype(np.float32)
+        BT_night = src_night.read(1, masked=True).astype(np.float32).filled(np.nan)
         night_profile = src_night.profile
     with rasterio.open(albedo_path) as src_alb:
-        albedo = src_alb.read(1).astype(np.float32)
+        albedo = src_alb.read(1, masked=True).astype(np.float64).filled(np.nan)
+        albedo = albedo * src_alb.scales[0] + src_alb.offsets[0]
         albedo_profile = src_alb.profile
 
     # Align raster datasets to daytime raster
@@ -1293,10 +1276,10 @@ def ATI(
 
     # Calculate ATI
     ati = (1 - albedo) / delta_T
-    ati = np.clip(ati, 0, 10)  # Avoid extreme values
+    ati[(albedo < 0) | (albedo > 1)] = np.nan
 
     # Save output
-    day_profile.update(dtype=rasterio.float32, count=1, compress='lzw')
+    day_profile.update(dtype=rasterio.float32, count=1, compress='lzw', nodata=np.nan)
     out_path = Path(TEMP_DIR) / output_path
     os.makedirs(out_path.parent, exist_ok=True)
     with rasterio.open(out_path, 'w', **day_profile) as dst:

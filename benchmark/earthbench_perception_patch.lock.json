@@ -1,7 +1,0 @@
-{
-  "dataset": "earthbench",
-  "repo": "haodijia/EarthBench-Fixed",
-  "revision": "2e260612848b3e2b1c55367f82e4d84c01ccbb94",
-  "path": "perception/patches/trajectory-repair-v1",
-  "version": "trajectory-repair-v1"
-}

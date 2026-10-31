@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import argparse
 import csv
-import hashlib
 import json
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -13,14 +12,6 @@ from urllib.parse import urlencode
 import requests
 
 from benchmark.dataset import REPO_ROOT, Dataset
-
-
-def sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as stream:
-        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def write_json(path: Path, value: dict) -> None:
@@ -48,7 +39,6 @@ def matches(path: Path, entry: dict) -> bool:
     return (
         path.is_file()
         and path.stat().st_size == entry["size"]
-        and sha256(path) == entry["sha256"]
     )
 
 
@@ -73,7 +63,6 @@ def seal(name: str, repo: str, version: str, revision: str, workers: int) -> dic
         return {
             "path": path.relative_to(root).as_posix(),
             "size": path.stat().st_size,
-            "sha256": sha256(path),
         }
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -82,7 +71,7 @@ def seal(name: str, repo: str, version: str, revision: str, workers: int) -> dic
     with dataset.path("perception_cache").open(newline="", encoding="utf-8") as stream:
         observations = list(csv.DictReader(stream, delimiter=";"))
     manifest = {
-        "schema_version": 1,
+        "schema_version": 2,
         "name": name,
         "dataset": repo,
         "version": version,
@@ -99,7 +88,6 @@ def seal(name: str, repo: str, version: str, revision: str, workers: int) -> dic
         "repo": repo,
         "revision": revision,
         "version": version,
-        "manifest_sha256": sha256(dataset.path("manifest")),
     }
     write_json(REPO_ROOT / "benchmark" / f"{name}.lock.json", lock)
     return manifest
@@ -107,13 +95,14 @@ def seal(name: str, repo: str, version: str, revision: str, workers: int) -> dic
 
 def load_manifest(root: Path, lock: dict) -> dict:
     path = root / "manifest.json"
-    if sha256(path) != lock["manifest_sha256"]:
-        raise ValueError(
-            "Dataset manifest differs from the release locked by this code"
-        )
     manifest = json.loads(path.read_text(encoding="utf-8"))
+    validate_manifest(root, lock, manifest)
+    return manifest
+
+
+def validate_manifest(root: Path, lock: dict, manifest: dict) -> None:
     if (
-        manifest["schema_version"] != 1
+        manifest["schema_version"] != 2
         or manifest["name"] != lock["dataset"]
         or manifest["dataset"] != lock["repo"]
         or manifest["version"] != lock["version"]
@@ -124,7 +113,6 @@ def load_manifest(root: Path, lock: dict) -> dict:
         raise ValueError("Duplicate or circular manifest entries")
     for name in names:
         release_path(root, name)
-    return manifest
 
 
 def verify(root: Path, manifest: dict, workers: int) -> dict:
@@ -174,19 +162,22 @@ def fetch(repo: str, revision: str, name: str, destination: Path) -> None:
 def download(root: Path, lock: dict, revision: str, workers: int) -> dict:
     root.mkdir(parents=True, exist_ok=True)
     path = root / "manifest.json"
-    if not path.is_file() or sha256(path) != lock["manifest_sha256"]:
-        fetch(lock["repo"], revision, "manifest.json", path)
-    manifest = load_manifest(root, lock)
+    pending = root / "manifest.json.download"
+    fetch(lock["repo"], revision, "manifest.json", pending)
+    manifest = json.loads(pending.read_text(encoding="utf-8"))
+    validate_manifest(root, lock, manifest)
+    previous = json.loads(path.read_text(encoding="utf-8")) if path.is_file() else None
+    reuse_files = previous == manifest
 
     def obtain(entry: dict) -> None:
         destination = release_path(root, entry["path"])
-        if matches(destination, entry):
+        if reuse_files and matches(destination, entry):
             return
         partial = destination.with_name(destination.name + ".download")
         fetch(lock["repo"], revision, entry["path"], partial)
         if not matches(partial, entry):
             partial.unlink()
-            raise ValueError(f"Downloaded dataset checksum mismatch: {entry['path']}")
+            raise ValueError(f"Downloaded dataset size mismatch: {entry['path']}")
         partial.replace(destination)
 
     with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -196,6 +187,13 @@ def download(root: Path, lock: dict, revision: str, workers: int) -> dict:
                     f"Verified {index}/{len(manifest['files'])} release files",
                     flush=True,
                 )
+    if previous is not None:
+        current_paths = {entry["path"] for entry in manifest["files"]}
+        for entry in previous["files"]:
+            if entry["path"] not in current_paths:
+                obsolete = release_path(root, entry["path"])
+                obsolete.unlink(missing_ok=True)
+    pending.replace(path)
     return manifest
 
 

@@ -127,5 +127,5 @@ def compute(context: MetricContext) -> dict:
 EarthBench-Fixed 的数据来源、修复规则和公式见 [PROTOCOL.md](PROTOCOL.md)。参考轨迹重建是数据集维护命令：
 
 ```bash
-uv run --locked python -m benchmark.build_ground_truth
+uv run --locked python -m benchmark.rebuild_references --work-dir /path/to/new-replay
 ```

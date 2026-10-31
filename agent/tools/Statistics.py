@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from fastmcp import FastMCP
 
-from utils import read_image, read_image_uint8, write_image, resolve_output_path
+from utils import read_aligned, read_image, read_image_uint8, write_image, resolve_output_path
 
 import sys as _sys
 import functools as _functools
@@ -221,6 +221,19 @@ def kurtosis(x: list[float], bias: bool = True, fisher: bool = True):
     return float(kurt)
 
 
+def _image_values(file_path: str, uint8: bool) -> "np.ndarray":
+    import numpy as np
+    image = read_image(file_path)
+    valid = np.isfinite(image)
+    if image.size == 0:
+        raise ValueError("Input image is empty")
+    if uint8 and valid.any():
+        image = read_image_uint8(file_path)
+    if image.ndim == 3:
+        image, valid = image[..., 0], valid[..., 0]
+    return image[valid]
+
+
 def calc_single_image_mean(file_path: str, uint8: bool = False) -> float | None:
     """
     Compute mean value of an image.
@@ -232,19 +245,11 @@ def calc_single_image_mean(file_path: str, uint8: bool = False) -> float | None:
         mean (float): Mean pixel value
     """
     import numpy as np
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
-        raise ValueError("Input image is empty")
-    
-    # Flatten image to 1D array for statistics calculation
-    flat = img.flatten()
-    valid = flat[np.isfinite(flat)]
-    if valid.size == 0:
+    values = _image_values(file_path, uint8)
+    if values.size == 0:
         return None
-    return float(np.mean(valid))
+    return float(np.mean(values))
+
 
 @mcp.tool(description='''
 Compute mean value of an batch of images.
@@ -271,7 +276,7 @@ def calc_batch_image_mean(file_list: list[str], uint8: bool = False) -> list[flo
 
 
 
-def calc_single_image_std(file_path: str, uint8: bool = False) -> float:
+def calc_single_image_std(file_path: str, uint8: bool = False) -> float | None:
     """
     Compute standard deviation value of an image.
 
@@ -282,19 +287,11 @@ def calc_single_image_std(file_path: str, uint8: bool = False) -> float:
         std (float): Standard deviation
     """
     import numpy as np
+    values = _image_values(file_path, uint8)
+    if values.size == 0:
+        raise ValueError("Image contains no valid pixels")
+    return float(np.std(values, ddof=1)) if values.size > 1 else 0.0
 
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
-        raise ValueError("Input image is empty")
-    
-    # Flatten image to 1D array for statistics calculation
-    flat = img.flatten()
-    flat = np.where(np.isinf(flat), np.nan, flat)
-
-    return float(np.nanstd(flat, ddof=1))
 
 @mcp.tool(description='''
 Description:
@@ -319,11 +316,11 @@ def calc_batch_image_std(file_list: list[str], uint8: bool = False) -> list[floa
     Returns:
     - std (list[float]): List of standard deviation values, one for each input image.
     '''
-    return [float(calc_single_image_std(file_path, uint8)) for file_path in file_list]
+    return [calc_single_image_std(file_path, uint8) for file_path in file_list]
 
 
 # @mcp.tool()
-def calc_single_image_median(file_path: str, uint8: bool = False) -> float:
+def calc_single_image_median(file_path: str, uint8: bool = False) -> float | None:
     """
     Compute median value of an image.
 
@@ -334,18 +331,11 @@ def calc_single_image_median(file_path: str, uint8: bool = False) -> float:
         median (float): Median pixel value
     """
     import numpy as np
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
-        raise ValueError("Input image is empty")
-    
-    # Flatten image to 1D array for statistics calculation
-    flat = img.flatten()
-    flat = np.where(np.isinf(flat), np.nan, flat)
+    values = _image_values(file_path, uint8)
+    if values.size == 0:
+        raise ValueError("Image contains no valid pixels")
+    return float(np.median(values))
 
-    return float(np.nanmedian(flat))
 
 @mcp.tool(description='''
 Description:
@@ -370,11 +360,11 @@ def calc_batch_image_median(file_list: list[str], uint8: bool = False) -> list[f
     Returns:
     - median (list[float]): List of median pixel values, one for each input image.
     '''
-    return [float(calc_single_image_median(file_path, uint8)) for file_path in file_list]
+    return [calc_single_image_median(file_path, uint8) for file_path in file_list]
 
 
 # @mcp.tool()
-def calc_single_image_min(file_path: str, uint8: bool = False) -> float:
+def calc_single_image_min(file_path: str, uint8: bool = False) -> float | None:
     """
     Compute min value of an image.
 
@@ -385,18 +375,11 @@ def calc_single_image_min(file_path: str, uint8: bool = False) -> float:
         min (flaot): Minimum pixel value
     """
     import numpy as np
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
-        raise ValueError("Input image is empty")
-    
-    # Flatten image to 1D array for statistics calculation
-    flat = img.flatten()
-    flat = np.where(np.isinf(flat), np.nan, flat)
+    values = _image_values(file_path, uint8)
+    if values.size == 0:
+        raise ValueError("Image contains no valid pixels")
+    return float(np.min(values))
 
-    return float(np.nanmin(flat))
 
 
 @mcp.tool(description='''
@@ -423,11 +406,11 @@ def calc_batch_image_min(file_list: list[str], uint8: bool = False) -> list[floa
     Returns:
     - min (list[float]): List of minimum pixel values, one for each input image.
     '''
-    return [float(calc_single_image_min(file_path, uint8)) for file_path in file_list]
+    return [calc_single_image_min(file_path, uint8) for file_path in file_list]
 
 
 # @mcp.tool()
-def calc_single_image_max(file_path: str, uint8: bool = False) -> float:
+def calc_single_image_max(file_path: str, uint8: bool = False) -> float | None:
     """
     Compute max value of an image.
 
@@ -438,18 +421,11 @@ def calc_single_image_max(file_path: str, uint8: bool = False) -> float:
         max (float): Maximum pixel value
     """
     import numpy as np
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
-        raise ValueError("Input image is empty")
-    
-    # Flatten image to 1D array for statistics calculation
-    flat = img.flatten()
-    flat = np.where(np.isinf(flat), np.nan, flat)
+    values = _image_values(file_path, uint8)
+    if values.size == 0:
+        raise ValueError("Image contains no valid pixels")
+    return float(np.max(values))
 
-    return float(np.nanmax(flat))
 
 @mcp.tool(description='''
 Description:
@@ -474,11 +450,11 @@ def calc_batch_image_max(file_list: list[str], uint8: bool = False) -> list[floa
     Returns:
     - max (list[float]): List of maximum pixel values, one for each input image.
     '''
-    return [float(calc_single_image_max(file_path, uint8)) for file_path in file_list]
+    return [calc_single_image_max(file_path, uint8) for file_path in file_list]
 
 
 # @mcp.tool()
-def calc_single_image_skewness(file_path: str, uint8: bool = False) -> float:
+def calc_single_image_skewness(file_path: str, uint8: bool = False) -> float | None:
     """
     Compute skewness value of an image.
 
@@ -490,18 +466,11 @@ def calc_single_image_skewness(file_path: str, uint8: bool = False) -> float:
     """
     import numpy as np
     from scipy.stats import skew
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
-        raise ValueError("Input image is empty")
-    
-    # Flatten image to 1D array for statistics calculation
-    flat = img.flatten()
-    flat = np.where(np.isinf(flat), np.nan, flat)
+    values = _image_values(file_path, uint8)
+    if values.size == 0:
+        raise ValueError("Image contains no valid pixels")
+    return float(skew(values, bias=False)) if np.ptp(values) > 0 else 0.0
 
-    return float(skew(flat, bias=False))
 
 
 @mcp.tool(description='''
@@ -535,11 +504,11 @@ def calc_batch_image_skewness(file_list: list[str], uint8: bool = False) -> list
     Returns:
     - skewness (list[float]): List of skewness values, one for each input image.
     '''
-    return [float(calc_single_image_skewness(file_path, uint8)) for file_path in file_list]
+    return [calc_single_image_skewness(file_path, uint8) for file_path in file_list]
 
 
 # @mcp.tool()
-def calc_single_image_kurtosis(file_path: str, uint8: bool = False) -> float:
+def calc_single_image_kurtosis(file_path: str, uint8: bool = False) -> float | None:
     """
     Compute kurtosis value of an image.
 
@@ -551,26 +520,11 @@ def calc_single_image_kurtosis(file_path: str, uint8: bool = False) -> float:
     """
     import numpy as np
     from scipy.stats import kurtosis
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
-        raise ValueError("Input image is empty")
-    
-    # Flatten image to 1D array for statistics calculation
-    flat = img.flatten()
-    flat = np.where(np.isinf(flat), np.nan, flat)
+    values = _image_values(file_path, uint8)
+    if values.size == 0:
+        raise ValueError("Image contains no valid pixels")
+    return float(kurtosis(values, fisher=False)) if np.ptp(values) > 0 else 0.0
 
-    # Remove NaN values for kurtosis calculation
-    flat_clean = flat[~np.isnan(flat)]
-    
-    if len(flat_clean) == 0:
-        raise ValueError("No valid data points for kurtosis calculation")
-    
-    # Calculate kurtosis (Fisher's definition, excess kurtosis)
-    # Add 3 to convert excess kurtosis to normal kurtosis
-    return float(kurtosis(flat_clean, fisher=False))
 
 
 @mcp.tool(description='''
@@ -604,11 +558,11 @@ def calc_batch_image_kurtosis(file_list: list[str], uint8: bool = False) -> list
         * Higher values → heavier tails
         * Lower values → lighter tails
     '''
-    return [float(calc_single_image_kurtosis(file_path, uint8)) for file_path in file_list]
+    return [calc_single_image_kurtosis(file_path, uint8) for file_path in file_list]
 
 
 
-def calc_single_image_sum(file_path: str, uint8: bool = False) -> float:
+def calc_single_image_sum(file_path: str, uint8: bool = False) -> float | None:
     """
     Compute sum value of an image.
 
@@ -620,18 +574,11 @@ def calc_single_image_sum(file_path: str, uint8: bool = False) -> float:
         sum (float): Sum pixel value
     """
     import numpy as np
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
-        raise ValueError("Input image is empty")
-    
-    # Flatten image to 1D array for statistics calculation
-    flat = img.flatten()
-    flat = np.where(np.isinf(flat), np.nan, flat)
+    values = _image_values(file_path, uint8)
+    if values.size == 0:
+        raise ValueError("Image contains no valid pixels")
+    return float(np.sum(values))
 
-    return float(np.nansum(flat))
 
 
 @mcp.tool(description='''
@@ -657,10 +604,10 @@ def calc_batch_image_sum(file_list: list[str], uint8: bool = False) -> list[floa
     Returns:
     - sum (list[float]): List of pixel sum values, one for each input image.
     '''
-    return [float(calc_single_image_sum(file_path, uint8)) for file_path in file_list] 
+    return [calc_single_image_sum(file_path, uint8) for file_path in file_list]
 
 
-def calc_single_image_hotspot_percentage(file_path: str, threshold: float, uint8: bool = False) -> float:
+def calc_single_image_hotspot_percentage(file_path: str, threshold: float, uint8: bool = False) -> float | None:
     """
     Compute hotspot percentage of an image.
 
@@ -673,28 +620,11 @@ def calc_single_image_hotspot_percentage(file_path: str, threshold: float, uint8
         percentage (float): Hotspot area percentage (0.0 to 1.0).
     """
     import numpy as np
-    if uint8:
-        img = read_image_uint8(file_path)
-    else:
-        img = read_image(file_path)
-    if img.size == 0:
-        raise ValueError("Input image is empty")
-    
-    # Flatten image to 1D array for statistics calculation
-    flat = img.flatten()
-    flat = np.where(np.isinf(flat), np.nan, flat)
-    
-    # Remove NaN values for calculation
-    valid_pixels = flat[~np.isnan(flat)]
-    
-    if len(valid_pixels) == 0:
-        return 0.0
-    
-    # Calculate hotspot percentage
-    hotspot_pixels = valid_pixels[valid_pixels > threshold]
-    hotspot_percentage = len(hotspot_pixels) / len(valid_pixels)
-    
-    return float(hotspot_percentage)
+    values = _image_values(file_path, uint8)
+    if values.size == 0:
+        raise ValueError("Image contains no valid pixels")
+    return float(np.count_nonzero(values > threshold) / values.size)
+
 
 
 @mcp.tool(description='''
@@ -1275,25 +1205,22 @@ def calculate_threshold_ratio(image_paths: str | list[str], threshold: float = 0
         img = read_image(image_path)
         # Handle multi-band images
         if img.ndim == 3:
-            # Assume (bands, height, width) or (height, width, bands)
-            if img.shape[0] <= 5 and img.shape[0] < img.shape[-1]:  # bands likely first
-                band = img[band_index]
-            else:  # bands likely last
-                band = img[..., band_index]
+            band = img[..., band_index]
         else:
             band = img
 
-        valid_pixels = ~np.isnan(band)
+        valid_pixels = np.isfinite(band)
         total_valid_pixels = np.sum(valid_pixels)
         if total_valid_pixels == 0:
-            ratios.append(0.0)
             continue
 
         pixels_above_threshold = np.sum((band > threshold) & valid_pixels)
         percentage = (pixels_above_threshold / total_valid_pixels) * 100
         ratios.append(float(percentage))
 
-    return float(np.mean(ratios)) if ratios else 0.0
+    if not ratios:
+        raise ValueError("No images contain valid pixels")
+    return float(np.mean(ratios))
 
 
 def calc_single_image_fire_pixels(file_path: str, fire_threshold: float = 0) -> int:
@@ -1571,9 +1498,9 @@ def get_percentile_value_from_image(
     dtypes = []
     for path in paths:
         with rasterio.open(path) as src:
-            image = src.read(1)
-            dtypes.append(image.dtype)
-        valid = image.astype(np.float32)
+            image = src.read(1, masked=True).astype(np.float64).filled(np.nan)
+            dtypes.append(np.dtype(src.dtypes[0]))
+        valid = image
         valid = valid[np.isfinite(valid)]
         if valid.size:
             arrays.append(valid)
@@ -1900,7 +1827,7 @@ def calc_batch_image_mean_max_min(
 
     for file_path in file_list:
         with rasterio.open(file_path) as src:
-            img = src.read(1).astype(np.float32)
+            img = src.read(1, masked=True).astype(np.float64).filled(np.nan)
             img = img[np.isfinite(img)]  # remove NaN or inf
 
             if img.size == 0:
@@ -2750,22 +2677,26 @@ def calculate_tif_average(file_list: list[str], output_path: str, uint8: bool = 
 
     if not file_list:
         raise ValueError("file_list must not be empty")
-    average = read_image(file_list[0]).astype(np.float64)
+    first = read_image(file_list[0]).astype(np.float64)
+    total = np.where(np.isfinite(first), first, 0.0)
+    count = np.isfinite(first).astype(np.int32)
     for file_path in file_list[1:]:
-        image = read_image(file_path)
-        if image.shape != average.shape:
-            raise ValueError("all images must have the same dimensions and band count")
-        average += image
-    average /= len(file_list)
+        image = read_aligned(file_path, file_list[0])
+        if image.shape != first.shape:
+            raise ValueError("all images must have the same band count")
+        valid = np.isfinite(image)
+        total += np.where(valid, image, 0.0)
+        count += valid
+    average = np.divide(total, count, out=np.full_like(total, np.nan), where=count > 0)
     if uint8:
         axes = (0, 1)
-        minimum = np.min(average, axis=axes, keepdims=True)
-        span = np.max(average, axis=axes, keepdims=True) - minimum
+        minimum = np.nanmin(average, axis=axes, keepdims=True)
+        span = np.nanmax(average, axis=axes, keepdims=True) - minimum
         average = np.divide(
             average - minimum, span, out=np.zeros_like(average), where=span > 0
         ) * 255
     output_path = TEMP_DIR / output_path
-    write_image(output_path, average, file_list[0], dtype="uint8" if uint8 else "float32")
+    write_image(output_path, average, file_list[0], dtype="uint8" if uint8 else "float32", nodata=None if uint8 else np.nan)
     return f"Result save at {output_path}"
 
 
@@ -2799,7 +2730,7 @@ def calculate_tif_difference(image_a_path: str, image_b_path: str, output_path: 
     import numpy as np
 
     image_a = read_image(image_a_path)
-    image_b = read_image(image_b_path)
+    image_b = read_aligned(image_b_path, image_a_path)
     if image_a.shape != image_b.shape:
         raise ValueError("images must have the same dimensions and band count")
     difference = image_b.astype(np.float64) - image_a.astype(np.float64)
@@ -2844,7 +2775,7 @@ def subtract(img1_path: str, img2_path: str, output_path: str) -> str:
     import rasterio
     
     img1 = read_image(img1_path)
-    img2 = read_image(img2_path)
+    img2 = read_aligned(img2_path, img1_path)
     
     result = img1.astype(np.float32) - img2.astype(np.float32)
     
@@ -2884,10 +2815,13 @@ def calculate_area(input_image_path: str, gsd: float | None):
     '''
     import numpy as np
     image = read_image(input_image_path)
+    foreground = np.isfinite(image) & (image != 0)
+    if image.ndim == 3:
+        foreground = np.any(foreground, axis=-1)
+    count = int(np.count_nonzero(foreground))
     if gsd is None:
-        return float(np.sum(image != 0))
-    else:
-        return float(np.sum(image != 0) * gsd * gsd)
+        return float(count)
+    return float(count * gsd * gsd)
 
 
 

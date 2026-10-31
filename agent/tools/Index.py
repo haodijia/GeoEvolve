@@ -3,7 +3,7 @@ import argparse
 from pathlib import Path
 from fastmcp import FastMCP
 
-from utils import read_image, read_image_uint8, resolve_output_path
+from utils import normalized_difference, read_image, read_image_uint8, resolve_output_path, write_image
 
 import sys as _sys
 import functools as _functools
@@ -34,43 +34,11 @@ def _calculate_ndvi(input_nir_path, input_red_path, output_path):
     Returns:
         str: Path to the saved NDVI file.
     """
-    output_path = resolve_output_path(output_path, TEMP_DIR)
-    import os
-    import rasterio
     import numpy as np
-
-    # Open the NIR and Red band raster files
-    with rasterio.open(input_nir_path) as nir_src:
-        nir_band = nir_src.read(1)  # Read the first band (assuming single-band rasters)
-        nir_profile = nir_src.profile  # Get the metadata profile
-
-    with rasterio.open(input_red_path) as red_src:
-        red_band = red_src.read(1)  # Read the first band (assuming single-band rasters)
-
-    # Ensure the input band data is in numpy array format
-    nir_band = np.array(nir_band, dtype=np.float32)
-    red_band = np.array(red_band, dtype=np.float32)
-
-    # Prevent division by zero by adding a small offset (e.g., 1e-6)
-    denominator = nir_band + red_band + 1e-6
-
-    # Calculate NDVI using the formula: NDVI = (NIR - Red) / (NIR + Red)
-    ndvi = (nir_band - red_band) / denominator
-
-    # Update the profile for the output raster (e.g., data type and NoData value)
-    ndvi_profile = nir_profile.copy()
-    ndvi_profile.update(
-        dtype=rasterio.float32,  # NDVI values are floating-point numbers
-        nodata=-9999,  # Set a NoData value
-        compress='lzw'  # Optional: compress the output file
-    )
-
-    # Save the NDVI result to the specified output path
-    os.makedirs((TEMP_DIR / output_path).parent, exist_ok=True)
-    with rasterio.open(TEMP_DIR / output_path, 'w', **ndvi_profile) as dst:
-        dst.write(ndvi.astype(rasterio.float32), 1)
-    
-    return f'Result save at {TEMP_DIR / output_path}'
+    output_path = resolve_output_path(output_path, TEMP_DIR)
+    index = normalized_difference(input_nir_path, input_red_path)
+    write_image(output_path, index, input_nir_path, dtype="float32", nodata=np.nan)
+    return f"Result save at {output_path}"
 
 
 @mcp.tool(description="""
@@ -120,43 +88,11 @@ def _calculate_ndwi(input_nir_path, input_swir_path, output_path):
     Returns:
         str: Path to the saved NDWI file.
     """
-    output_path = resolve_output_path(output_path, TEMP_DIR)
-    import os
-    import rasterio
     import numpy as np
-
-    # Open the NIR and SWIR band raster files
-    with rasterio.open(input_nir_path) as nir_src:
-        nir_band = nir_src.read(1)  # Read the first band (assuming single-band rasters)
-        nir_profile = nir_src.profile  # Get the metadata profile
-
-    with rasterio.open(input_swir_path) as swir_src:
-        swir_band = swir_src.read(1)  # Read the first band (assuming single-band rasters)
-
-    # Ensure the input band data is in numpy array format
-    nir_band = np.array(nir_band, dtype=np.float32)
-    swir_band = np.array(swir_band, dtype=np.float32)
-
-    # Prevent division by zero by adding a small offset (e.g., 1e-6)
-    denominator = nir_band + swir_band + 1e-6
-
-    # Calculate NDWI using the formula: NDWI = (NIR - SWIR) / (NIR + SWIR)
-    ndwi = (nir_band - swir_band) / denominator
-
-    # Update the profile for the output raster (e.g., data type and NoData value)
-    ndwi_profile = nir_profile.copy()
-    ndwi_profile.update(
-        dtype=rasterio.float32,  # NDWI values are floating-point numbers
-        nodata=-9999,  # Set a NoData value
-        compress='lzw'  # Optional: compress the output file
-    )
-
-    # Save the NDWI result to the specified output path
-    os.makedirs((TEMP_DIR / output_path).parent, exist_ok=True)
-    with rasterio.open(TEMP_DIR / output_path, 'w', **ndwi_profile) as dst:
-        dst.write(ndwi.astype(rasterio.float32), 1)  # Write the NDWI band
-    
-    return f'Result save at {TEMP_DIR / output_path}'
+    output_path = resolve_output_path(output_path, TEMP_DIR)
+    index = normalized_difference(input_nir_path, input_swir_path)
+    write_image(output_path, index, input_nir_path, dtype="float32", nodata=np.nan)
+    return f"Result save at {output_path}"
 
 
 @mcp.tool(description="""
@@ -206,43 +142,11 @@ def calculate_ndbi(input_swir_path, input_nir_path, output_path):
     Returns:
         str: Path to the saved NDBI file.
     """
-    output_path = resolve_output_path(output_path, TEMP_DIR)
-    import os
-    import rasterio
     import numpy as np
-
-    # Open the SWIR and NIR band raster files
-    with rasterio.open(input_swir_path) as swir_src:
-        swir_band = swir_src.read(1)  # Read the first band (assuming single-band rasters)
-        swir_profile = swir_src.profile  # Get the metadata profile
-
-    with rasterio.open(input_nir_path) as nir_src:
-        nir_band = nir_src.read(1)  # Read the first band (assuming single-band rasters)
-
-    # Ensure the input band data is in numpy array format
-    swir_band = np.array(swir_band, dtype=np.float32)
-    nir_band = np.array(nir_band, dtype=np.float32)
-
-    # Prevent division by zero by adding a small offset (e.g., 1e-6)
-    denominator = swir_band + nir_band + 1e-6
-
-    # Calculate NDBI using the formula: NDBI = (SWIR - NIR) / (SWIR + NIR)
-    ndbi = (swir_band - nir_band) / denominator
-
-    # Update the profile for the output raster (e.g., data type and NoData value)
-    ndbi_profile = swir_profile.copy()
-    ndbi_profile.update(
-        dtype=rasterio.float32,  # NDBI values are floating-point numbers
-        nodata=-9999,  # Set a NoData value
-        compress='lzw'  # Optional: compress the output file
-    )
-
-    # Save the NDBI result to the specified output path
-    os.makedirs((TEMP_DIR / output_path).parent, exist_ok=True)
-    with rasterio.open(TEMP_DIR / output_path, 'w', **ndbi_profile) as dst:
-        dst.write(ndbi.astype(rasterio.float32), 1)  # Write the NDBI band
-
-    return f'Result save at {TEMP_DIR / output_path}'
+    output_path = resolve_output_path(output_path, TEMP_DIR)
+    index = normalized_difference(input_swir_path, input_nir_path)
+    write_image(output_path, index, input_swir_path, dtype="float32", nodata=np.nan)
+    return f"Result save at {output_path}"
 
 @mcp.tool(description="""
 Batch-calculate NDBI from multiple pairs of SWIR/NIR raster files and save results.
@@ -325,7 +229,7 @@ def  calculate_evi(input_nir_path, input_red_path, input_blue_path, output_path,
     evi_profile = nir_profile.copy()
     evi_profile.update(
         dtype=rasterio.float32,  # EVI values are floating-point numbers
-        nodata=-9999,  # Set a NoData value
+        nodata=np.nan,  # Invalid normalized differences remain masked
         compress='lzw'  # Optional: compress the output file
     )
 
@@ -395,43 +299,11 @@ def _calculate_nbr(input_nir_path, input_swir_path, output_path):
     Returns:
         str: Path to the saved NBR file.
     """
-    output_path = resolve_output_path(output_path, TEMP_DIR)
-    import os
-    import rasterio
     import numpy as np
-
-    # Open the NIR and SWIR band raster files
-    with rasterio.open(input_nir_path) as nir_src:
-        nir_band = nir_src.read(1)  # Read the first band (assuming single-band rasters)
-        nir_profile = nir_src.profile  # Get the metadata profile
-
-    with rasterio.open(input_swir_path) as swir_src:
-        swir_band = swir_src.read(1)  # Read the first band (assuming single-band rasters)
-
-    # Ensure the input band data is in numpy array format
-    nir_band = np.array(nir_band, dtype=np.float32)
-    swir_band = np.array(swir_band, dtype=np.float32)
-
-    # Prevent division by zero by adding a small offset (e.g., 1e-6)
-    denominator = nir_band + swir_band + 1e-6
-
-    # Calculate NBR using the formula: NBR = (NIR - SWIR) / (NIR + SWIR)
-    nbr = (nir_band - swir_band) / denominator
-
-    # Update the profile for the output raster (e.g., data type and NoData value)
-    nbr_profile = nir_profile.copy()
-    nbr_profile.update(
-        dtype=rasterio.float32,  # NBR values are floating-point numbers
-        nodata=-9999,  # Set a NoData value
-        compress='lzw'  # Optional: compress the output file
-    )
-
-    # Save the NBR result to the specified output path
-    os.makedirs((TEMP_DIR / output_path).parent, exist_ok=True)
-    with rasterio.open(TEMP_DIR / output_path, 'w', **nbr_profile) as dst:
-        dst.write(nbr.astype(rasterio.float32), 1)  # Write the NBR band
-
-    return f'Result save at {TEMP_DIR / output_path}'
+    output_path = resolve_output_path(output_path, TEMP_DIR)
+    index = normalized_difference(input_nir_path, input_swir_path)
+    write_image(output_path, index, input_nir_path, dtype="float32", nodata=np.nan)
+    return f"Result save at {output_path}"
 
 
 @mcp.tool(description="""
@@ -506,7 +378,7 @@ def calculate_fvc(input_nir_path, input_red_path, output_path, ndvi_min=0.1, ndv
     denominator = nir_band + red_band + 1e-6
 
     # Calculate NDVI using the formula: NDVI = (NIR - Red) / (NIR + Red)
-    ndvi = (nir_band - red_band) / denominator
+    ndvi = normalized_difference(input_nir_path, input_red_path)
 
     # Calculate FVC using the formula: FVC = ((NDVI - NDVI_min) / (NDVI_max - NDVI_min)) * 100%
     fvc = ((ndvi - ndvi_min) / (ndvi_max - ndvi_min)) * 100
@@ -518,7 +390,7 @@ def calculate_fvc(input_nir_path, input_red_path, output_path, ndvi_min=0.1, ndv
     fvc_profile = nir_profile.copy()
     fvc_profile.update(
         dtype=rasterio.float32,  # FVC values are floating-point numbers
-        nodata=-9999,  # Set a NoData value
+        nodata=np.nan,  # Invalid normalized differences remain masked
         compress='lzw'  # Optional: compress the output file
     )
 
@@ -621,7 +493,7 @@ def calculate_wri(input_green_path, input_red_path, input_nir_path, input_swir_p
     wri_profile = green_profile.copy()
     wri_profile.update(
         dtype=rasterio.float32,  # WRI values are floating-point numbers
-        nodata=-9999,  # Set a NoData value
+        nodata=np.nan,  # Invalid normalized differences remain masked
         compress='lzw'  # Optional: compress the output file
     )
 
@@ -689,43 +561,11 @@ def _calculate_ndti(input_red_path, input_green_path, output_path):
     Returns:
         str: Path to the saved NDTI file.
     """
-    output_path = resolve_output_path(output_path, TEMP_DIR)
-    import os
-    import rasterio
     import numpy as np
-
-    # Open the Red and Green band raster files
-    with rasterio.open(input_red_path) as red_src:
-        red_band = red_src.read(1)  # Read the first band (assuming single-band rasters)
-        red_profile = red_src.profile  # Get the metadata profile
-
-    with rasterio.open(input_green_path) as green_src:
-        green_band = green_src.read(1)  # Read the first band (assuming single-band rasters)
-
-    # Ensure the input band data is in numpy array format
-    red_band = np.array(red_band, dtype=np.float32)
-    green_band = np.array(green_band, dtype=np.float32)
-
-    # Prevent division by zero by adding a small offset (e.g., 1e-6)
-    denominator = red_band + green_band + 1e-6
-
-    # Calculate NDTI using the formula: NDTI = (Red - Green) / (Red + Green)
-    ndti = (red_band - green_band) / denominator
-
-    # Update the profile for the output raster (e.g., data type and NoData value)
-    ndti_profile = red_profile.copy()
-    ndti_profile.update(
-        dtype=rasterio.float32,  # NDTI values are floating-point numbers
-        nodata=-9999,  # Set a NoData value
-        compress='lzw'  # Optional: compress the output file
-    )
-
-    # Save the NDTI result to the specified output path
-    os.makedirs((TEMP_DIR / output_path).parent, exist_ok=True)
-    with rasterio.open(TEMP_DIR / output_path, 'w', **ndti_profile) as dst:
-        dst.write(ndti.astype(rasterio.float32), 1)  # Write the NDTI band
-
-    return f'Result save at {TEMP_DIR / output_path}'
+    output_path = resolve_output_path(output_path, TEMP_DIR)
+    index = normalized_difference(input_red_path, input_green_path)
+    write_image(output_path, index, input_red_path, dtype="float32", nodata=np.nan)
+    return f"Result save at {output_path}"
 
 
 @mcp.tool(description="""
@@ -861,81 +701,11 @@ def calculate_ndsi(input_green_path: str, input_swir_path: str, output_path: str
     Returns:
         str: Path to the output NDSI raster file.
     """
-    output_path = resolve_output_path(output_path, TEMP_DIR)
-    import os
-    import rasterio
     import numpy as np
-    from scipy.ndimage import zoom
-
-    # Open the Green and SWIR band raster files
-    with rasterio.open(input_green_path) as green_src:
-        green_band = green_src.read(1)  # Read the first band (assuming single-band rasters)
-        green_profile = green_src.profile  # Get the metadata profile
-
-    with rasterio.open(input_swir_path) as swir_src:
-        swir_band = swir_src.read(1)  # Read the first band (assuming single-band rasters)
-        swir_profile = swir_src.profile
-
-    # Ensure the input band data is in numpy array format
-    green_band = np.array(green_band, dtype=np.float32)
-    swir_band = np.array(swir_band, dtype=np.float32)
-    
-    # Apply scaling factor for MODIS surface reflectance data
-    # MODIS surface reflectance is typically stored as integer values that need to be scaled by 0.0001
-    scale_factor = 0.0001
-    green_band = green_band * scale_factor
-    swir_band = swir_band * scale_factor
-    
-    # Handle size mismatch by resampling to the smaller size
-    if green_band.shape != swir_band.shape:
-        # Determine target size (smaller of the two)
-        target_height = min(green_band.shape[0], swir_band.shape[0])
-        target_width = min(green_band.shape[1], swir_band.shape[1])
-        target_shape = (target_height, target_width)
-        
-        # Resample green band if needed
-        if green_band.shape != target_shape:
-            zoom_factors = (target_height / green_band.shape[0], target_width / green_band.shape[1])
-            green_band = zoom(green_band, zoom_factors, order=1)
-        # Resample SWIR band if needed
-        if swir_band.shape != target_shape:
-            zoom_factors = (target_height / swir_band.shape[0], target_width / swir_band.shape[1])
-            swir_band = zoom(swir_band, zoom_factors, order=1)
-
-    # Handle invalid values and outliers
-    # Set very large or very small values to NaN (outside reasonable reflectance range)
-    green_band = np.where((green_band < 0) | (green_band > 1), np.nan, green_band)
-    swir_band = np.where((swir_band < 0) | (swir_band > 1), np.nan, swir_band)
-    
-    # Prevent division by zero by adding a small offset (e.g., 1e-6)
-    denominator = green_band + swir_band + 1e-6
-    
-    # Set denominator to NaN where both bands are invalid
-    denominator = np.where((np.isnan(green_band)) | (np.isnan(swir_band)), np.nan, denominator)
-
-    # Calculate NDSI using the formula: NDSI = (Green - SWIR) / (Green + SWIR)
-    ndsi = (green_band - swir_band) / denominator
-    
-    # Ensure NDSI values are within reasonable range [-1, 1]
-    ndsi = np.clip(ndsi, -1, 1)
-
-    # Update the profile for the output raster (e.g., data type and NoData value)
-    # Use the profile from the smaller image
-    output_profile = swir_profile.copy() if swir_band.shape[0] <= green_band.shape[0] else green_profile.copy()
-    output_profile.update(
-        dtype=rasterio.float32,  # NDSI values are floating-point numbers
-        nodata=-9999,  # Set a NoData value
-        compress='lzw',  # Optional: compress the output file
-        height=ndsi.shape[0],
-        width=ndsi.shape[1]
-    )
-
-    # Save the NDSI result to the specified output path
-    os.makedirs((TEMP_DIR / output_path).parent, exist_ok=True)
-    with rasterio.open(TEMP_DIR / output_path, 'w', **output_profile) as dst:
-        dst.write(ndsi.astype(rasterio.float32), 1)  # Write the NDSI band
-
-    return f'Result save at {TEMP_DIR / output_path}'
+    output_path = resolve_output_path(output_path, TEMP_DIR)
+    index = normalized_difference(input_green_path, input_swir_path)
+    write_image(output_path, index, input_green_path, dtype="float32", nodata=np.nan)
+    return f"Result save at {output_path}"
 
 
 @mcp.tool(description="""
