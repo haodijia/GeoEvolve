@@ -2,7 +2,8 @@
 
 The benchmark exposes the official 104 local MCP tools across Analysis, Index, Inversion,
 Perception, and Statistics. CPU raster operations use Rasterio. Perception reads
-the fixed observation CSV and masks; benchmark runs require no GPU model service.
+the released CSV/masks plus a reviewed frozen patch. Evaluation uses only offline
+observations and requires no GPU model service. See [cache repair](../../docs/perception-cache-repair.md).
 
 ```bash
 uv sync --locked
@@ -34,15 +35,43 @@ Evaluation and reflection read the recorded tool results, not those temporary fi
 
 ## Observation cache
 
+The eight model tools have distinct contracts:
+
+| Tool | Task and required input |
+| --- | --- |
+| MSCN | Whole-image scene classification using AID's 30 categories; no object counts or locations. |
+| RemoteCLIP | Whole-image scene classification using a separate 19-category taxonomy. Its labels are not interchangeable with MSCN's. |
+| Strip-R-CNN | Ships and vessel types only. Other object categories use SM3Det. |
+| SM3Det | All matching object boxes in original-image pixels, retaining the prompt's conditions. |
+| RemoteSAM | One region described by the complete referring expression. Preserve all target conditions; multiple unresolved candidates are an error. |
+| InstructSAM | Integer count of all objects satisfying the complete requested conditions. |
+| SAM2 | Union foreground mask from explicit pixel-coordinate boxes; supplied boxes determine the region. |
+| ChangeOS | Damaged-building mask from an aligned, ordered image pair; identical inputs produce building footprints. |
+
+Image paths, prompts and output paths must be nonblank. SAM2 requires at least
+one box, with exactly four numeric coordinates per box. Tool schemas describe
+these parameters without exposing per-question cache contents or vocabulary.
+No cache miss is interpreted as zero objects. RemoteSAM preserves referring
+conditions and never selects an arbitrary box from ambiguous observations.
+
 `benchmark/earthbench/perception/observations.csv` contains 461 observations: MSCN 172, RemoteCLIP 172,
 SM3Det 57, InstructSAM 24, RemoteSAM 10, SAM2 9, and ChangeOS 17. The pinned dataset
 contains all 26 referenced masks. `EARTH_BENCH_PERCEPTION_CACHE` explicitly selects a
 different CSV; normal benchmark runs use the pinned cache.
 
-Lookups require a recorded image, prompt, and bounding boxes. Unknown requests
-raise an error. Strip-R-CNN has no observations in this version and cannot serve
-real benchmark requests; its interface is exercised only with a validator
-fixture. No replacement detector or runtime inference is attempted.
+Offline lookups require a recorded image, prompt, and bounding boxes. Unknown requests
+raise an error. Strip-R-CNN has no observations in the released CSV; reviewed ship
+observations are supplied by the patch. Only reviewed, frozen observations are
+added to the released cache. Raw outputs from previous service experiments are
+not read by evaluation.
+
+The default patch is `earthbench_perception_patch/observations.json` beside the
+resolved dataset directory. `EARTH_BENCH_PERCEPTION_PATCH` selects another patch.
+The patch retains model provenance and review decisions. Original observations
+are preserved; conflicting additions fail at load time. Unknown prompts remain
+errors. Offline matching never calls a model, changes agent-visible prompts, or
+uses answers to select a cached result. Image paths, tool, normalized prompt,
+bounding boxes and paired-image order all remain part of the lookup key.
 
 The released snapshot contains the fixed observation cache, masks, and their
 provenance under its `provenance/` directory. Runtime setup uses these verified
@@ -50,7 +79,8 @@ assets directly. On cache load, inputs are compared byte for byte (without file
 hashes); existing observations are expanded to identical images under other
 recorded paths. The pinned snapshot gains seven exact query combinations this
 way. Model, prompt, bounding boxes, and input order are preserved; recorded keys
-are never overwritten. Tool descriptions and per-question prompts are unchanged.
+are never overwritten. Tool descriptions explain the task, required conditions,
+parameters and return values without exposing per-question cached vocabulary.
 
 Numeric and array parameters have explicit JSON schema types. Output paths may
 be relative to the question workspace or absolute within it; paths outside the

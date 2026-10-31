@@ -1,14 +1,19 @@
 model_label: qwen8b
-model_name: qwen3-8b
-base_url: http://localhost:8000/v1
+model_name: /data/pub/models/Qwen3-8B
+base_url: http://127.0.0.1:18000/v1
 autoplanning: true
 max_attempts: 1
 api_key_env: OPENAI_API_KEY
+request_timeout: 600
+question_timeout: 1200
+generate_args:
+  chat_template_kwargs:
+    enable_thinking: true
 datasets:
 - earthbench
 sample: null
-concurrency: 1
-langsmith: false
+concurrency: 4
+langsmith: true
 plugins: []
 agent_config_path: agent/mcp.json
 output_base_dir: runs

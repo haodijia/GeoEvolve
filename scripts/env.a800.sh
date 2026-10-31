@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+export PATH=/home/zhangjai/.local/bin:$PATH
+export UV_PROJECT_ENVIRONMENT=/data/whu/7_jia/envs/04-agent/GeoEvolve
+export UV_CACHE_DIR=/data/whu/7_jia/cache/uv
+export UV_PYTHON_INSTALL_DIR=/data/whu/7_jia/python
+export TMPDIR=/data/whu/7_jia/tmp/04-agent/GeoEvolve
+export XDG_CACHE_HOME=/data/whu/7_jia/cache
+export HF_HOME=/data/whu/7_jia/cache/huggingface
+export TORCH_HOME=/data/whu/7_jia/cache/torch
+export OMP_NUM_THREADS=1
+export OPENBLAS_NUM_THREADS=1
+export MKL_NUM_THREADS=1
+export NUMEXPR_NUM_THREADS=1
+export PYTHONUNBUFFERED=1
+export NO_PROXY=127.0.0.1,localhost
+export no_proxy=127.0.0.1,localhost
+source /data/whu/7_jia/logs/04-agent/GeoEvolve/credentials.env

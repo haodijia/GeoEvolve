@@ -1,0 +1,22 @@
+model_label: qwen32b
+model_name: /data/pub/models/Qwen3-32B
+base_url: http://127.0.0.1:18000/v1
+autoplanning: true
+max_attempts: 1
+api_key_env: OPENAI_API_KEY
+request_timeout: 1800
+question_timeout: 3600
+temperature: 0.6
+generate_args:
+  top_p: 0.95
+  top_k: 20
+  chat_template_kwargs:
+    enable_thinking: true
+datasets:
+- earthbench
+sample: null
+concurrency: 4
+langsmith: true
+plugins: []
+agent_config_path: agent/mcp.json
+output_base_dir: runs

@@ -1,0 +1,24 @@
+model_label: qwen35_9b_vllm020_native
+model_name: /data/whu/7_jia/models/04-agent/vllm-qwen36-020/Qwen3.5-9B
+base_url: http://127.0.0.1:18000/v1
+api_key_env: OPENAI_API_KEY
+preserve_reasoning: true
+request_timeout: 1800
+question_timeout: 3600
+temperature: 1.0
+generate_args:
+  top_p: 0.95
+  top_k: 20
+  chat_template_kwargs:
+    enable_thinking: true
+autoplanning: true
+datasets:
+- earthbench
+sample: null
+concurrency: 8
+langsmith: true
+max_attempts: 1
+plugins: []
+agent_config_path: agent/mcp.json
+output_base_dir: /data/whu/7_jia/logs/04-agent/GeoEvolve/runs
+recursion_limit: 50

@@ -332,10 +332,18 @@ async def run_experiment(
                 resume_from=str(resume_from_dir),
                 resume_through_attempt=resume_through_attempt,
             )
+    from agent.perception_patch import patch_metadata
+
+    perception_cache = {
+        "released_cache": str(dataset.path("perception_cache")) if "perception_cache" in dataset.metadata else None,
+        "reviewed_patch": patch_metadata(dataset.name),
+    }
+    metadata["perception_cache"] = perception_cache
+    _write_json(result_dir / "perception_cache.json", perception_cache)
     metadata["status"] = "running"
     _write_json(result_dir / "run.json", metadata)
     try:
-        async with trace_run(config, dataset.name, run_dir):
+        async with trace_run(config, dataset.name, run_dir, perception_cache=perception_cache):
             await _execute_experiment(
                 config,
                 dataset,

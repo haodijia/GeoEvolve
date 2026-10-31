@@ -22,7 +22,7 @@ def langsmith_api_key() -> str:
 
 @asynccontextmanager
 async def trace_run(
-    config: ExperimentConfig, dataset_name: str, run_dir: Path
+    config: ExperimentConfig, dataset_name: str, run_dir: Path, *, perception_cache: dict
 ) -> AsyncIterator[None]:
     client = Client(api_key=langsmith_api_key()) if config.langsmith else None
     try:
@@ -38,6 +38,7 @@ async def trace_run(
                 "model": config.model_name,
                 "plugins": [plugin.name for plugin in config.plugins],
                 "concurrency": config.concurrency,
+                "perception_cache": perception_cache,
             },
         ):
             yield

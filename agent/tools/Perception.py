@@ -7,8 +7,10 @@ import os
 import re
 import shutil
 from pathlib import Path
+from typing import Annotated
 
 from fastmcp import FastMCP
+from pydantic import Field
 from utils import resolve_output_path
 
 import sys as _sys
@@ -439,66 +441,28 @@ def _load_cache() -> list[dict[str, str]]:
                 f"Perception cache columns must be {sorted(required)}; "
                 f"got {reader.fieldnames}"
             )
-        _CACHE_ROWS = _expand_identical_images([dict(row) for row in reader])
+        rows = [dict(row) for row in reader]
+    from agent.perception_patch import equivalent_results, patch_rows
+
+    def observation_key(row):
+        return (_row_paths(row["file_path"]), row["model"],
+                _normalize_prompt(row["text_prompt"]),
+                repr(ast.literal_eval(row["bbox"])) if row["bbox"].strip() else "")
+
+    known = {observation_key(row): row for row in rows}
+    for row in patch_rows():
+        identity = observation_key(row)
+        if identity in known:
+            if not equivalent_results(_decode(known[identity]["result"]), _decode(row["result"])):
+                raise ValueError(f"Conflicting perception patch observation: {identity}")
+            continue
+        rows.append(row)
+        known[identity] = row
+    _CACHE_ROWS = _expand_identical_images(rows)
     return _CACHE_ROWS
 
 
-_PROMPT_SYNONYMS = {
-    "airplane": ("airplanes", "plane", "planes", "aircraft", "aeroplane", "aeroplanes"),
-    "baseball diamond": ("baseball diamonds", "baseball field", "baseball fields"),
-    "basketball court": ("basketball courts", "basketball field", "basketball fields"),
-    "tennis court": ("tennis courts",),
-    "soccer ball field": (
-        "soccer ball fields", "soccer field", "soccer fields", "soccer pitch",
-        "soccer pitches", "football field", "football fields", "football pitch",
-        "football pitches",
-    ),
-    "ground track field": (
-        "ground track fields", "athletics track", "athletics tracks",
-        "running track", "running tracks", "track and field",
-    ),
-    "storage tank": ("storage tanks",),
-    "small vehicle": ("small vehicles",),
-    "large vehicle": ("large vehicles",),
-    "vehicle": ("vehicles",),
-    "ship": ("ships", "vessel", "vessels"),
-    "swimming pool": ("swimming pools", "pool", "pools"),
-    "harbor": ("harbors", "harbour", "harbours", "port", "ports"),
-    "bridge": ("bridges",),
-    "roundabout": ("roundabouts", "traffic circle", "traffic circles"),
-}
-_PROMPT_ALIASES = {
-    alias: canonical
-    for canonical, aliases in _PROMPT_SYNONYMS.items()
-    for alias in (canonical, *aliases)
-}
-_PROMPT_ALIAS_PATTERN = re.compile(
-    r"\b(?:" + "|".join(
-        re.escape(alias) for alias in sorted(_PROMPT_ALIASES, key=len, reverse=True)
-    ) + r")\b"
-)
-
-
-def _normalize_text(value: str) -> str:
-    return " ".join(re.findall(r"[a-z0-9]+", value.lower()))
-
-
-def _normalize_prompt(value: str) -> str:
-    """Canonicalize synonymous target classes while retaining their qualifiers."""
-    text = _normalize_text(value)
-    text = _PROMPT_ALIAS_PATTERN.sub(lambda match: _PROMPT_ALIASES[match[0]], text)
-    text = re.sub(r"^(?:a|an|the)\s+", "", text)
-    for direction, adjective in (
-        ("west", "westernmost"), ("east", "easternmost"),
-        ("north", "northernmost"), ("south", "southernmost"),
-    ):
-        text = re.sub(rf"\b(?:furthest|farthest) {direction}\b", adjective, text)
-        text = re.sub(
-            rf"\b(?:(?:located|situated) )?(?:on|in|at) (?:the )?{adjective} (?:side|position)\b",
-            adjective,
-            text,
-        )
-    return text
+from agent.perception_prompts import normalize_prompt as _normalize_prompt
 
 
 def _row_paths(value: str) -> tuple[str, ...]:
@@ -533,7 +497,7 @@ def _expand_identical_images(rows: list[dict[str, str]]) -> list[dict[str, str]]
         bbox = row["bbox"].strip()
         return (
             _row_paths(row["file_path"]), row["model"],
-            _normalize_text(row["text_prompt"]),
+            _normalize_prompt(row["text_prompt"]),
             str(ast.literal_eval(bbox)) if bbox else "",
         )
 
@@ -581,40 +545,23 @@ def _lookup(
     if not candidates:
         raise LookupError(f"No cached {model} result for {expected_paths}")
 
-    if text_prompt:
-        prompt = _normalize_prompt(text_prompt)
-        prompt_matches = [
-            row
-            for row in candidates
-            if _normalize_prompt(row.get("text_prompt", "")) == prompt
-        ]
-        if not prompt_matches:
-            raise LookupError(
-                f"No cached {model} result for prompt {text_prompt!r} "
-                f"and paths {expected_paths}"
-            )
-        candidates = prompt_matches
-
-    if bbox is not None:
-        bbox_matches = []
-        for row in candidates:
-            raw_bbox = row.get("bbox", "").strip()
-            if not raw_bbox:
-                continue
-            try:
-                if ast.literal_eval(raw_bbox) == bbox:
-                    bbox_matches.append(row)
-            except (SyntaxError, ValueError):
-                continue
-        if not bbox_matches:
-            raise LookupError(
-                f"No cached {model} result for the requested bounding boxes "
-                f"and paths {expected_paths}"
-            )
-        candidates = bbox_matches
+    prompt = _normalize_prompt(text_prompt)
+    candidates = [row for row in candidates
+                  if _normalize_prompt(row.get("text_prompt", "")) == prompt]
+    if not candidates:
+        raise LookupError(
+            f"No cached {model} result for prompt {text_prompt!r} and paths {expected_paths}"
+        )
+    candidates = [row for row in candidates
+                  if (ast.literal_eval(row["bbox"]) if row["bbox"].strip() else None) == bbox]
+    if not candidates:
+        raise LookupError(
+            f"No cached {model} result for the requested bounding boxes and paths {expected_paths}"
+        )
 
     results = [_decode(row["result"]) for row in candidates]
-    if any(result != results[0] for result in results[1:]):
+    from agent.perception_patch import equivalent_results
+    if any(not equivalent_results(result, results[0]) for result in results[1:]):
         raise LookupError(
             f"Cached {model} lookup is ambiguous for {expected_paths}; "
             f"matched {len(candidates)} rows with different results"
@@ -639,52 +586,94 @@ def _copy_cached_artifact(cached_result, output_path: str) -> str:
     return f"Result save at {destination.resolve()}"
 
 
-@mcp.tool(description="Return a cached MSCN scene-classification result.")
-def MSCN(input_image_path: str):
+ImagePath = Annotated[str, Field(min_length=1, pattern=r"\S", description="Path to an existing local input image.")]
+OutputPath = Annotated[str, Field(min_length=1, pattern=r"\S", description="Mask output path inside the current question workspace, relative or absolute.")]
+ShipPrompt = Annotated[str, Field(min_length=1, pattern=r"\S", description="Ship or vessel type to detect, preserving any requested attributes. Other object categories belong to SM3Det.")]
+DetectionPrompt = Annotated[str, Field(min_length=1, pattern=r"\S", description="Object category to detect, preserving every requested attribute, spatial relation and selection condition.")]
+GroundingPrompt = Annotated[str, Field(min_length=1, pattern=r"\S", description="Complete description identifying one target region. Preserve all direction, size, color, ordinal and relational conditions from the task; do not replace it with only the category.")]
+CountingPrompt = Annotated[str, Field(min_length=1, pattern=r"\S", description="Objects to count, including every requested attribute and restriction on which instances are included.")]
+BoundingBox = Annotated[list[float], Field(min_length=4, max_length=4)]
+BoundingBoxes = Annotated[list[BoundingBox], Field(min_length=1, description="One or more [x_min, y_min, x_max, y_max] boxes in original-image pixels, with x_min < x_max and y_min < y_max. Coordinates are not normalized to 0..1.")]
+
+
+@mcp.tool(description="""Classify the overall scene and land use of one image using the AID 30-category taxonomy.
+Return predicted_class, confidence and top5_predictions (pairs of class and score).
+This is a whole-image classification, not an object count or location. The dominant scene label
+does not establish whether a particular object exists. Use SM3Det for object boxes,
+InstructSAM for counts and RemoteSAM for one specifically described region.""")
+def MSCN(input_image_path: ImagePath):
     return _lookup("MSCN", input_image_path)
 
 
-@mcp.tool(description="Return a cached RemoteCLIP scene-classification result.")
-def RemoteCLIP(input_image_path: str):
+@mcp.tool(description="""Classify the overall scene and land use of one image using RemoteCLIP's 19-category taxonomy.
+Return predicted_class, confidence and top5_predictions (rank, class and probability).
+Its label set differs from MSCN's AID categories, so the two classifications are not interchangeable.
+The dominant scene label does not establish object presence, count or location; use the object tools for those tasks.""")
+def RemoteCLIP(input_image_path: ImagePath):
     return _lookup("RemoteCLIP", input_image_path)
 
 
-@mcp.tool(description="Return cached Strip R-CNN object detections.")
-def Strip_R_CNN(input_image_path: str, text_prompt: str):
+@mcp.tool(description="""Detect ships matching text_prompt in a remote sensing image.
+Scope is ships and vessel types; use SM3Det for other object categories, including harbor infrastructure.
+Return all matching ship boxes as a list of [x_min, y_min, x_max, y_max] in original-image pixels.
+Preserve requested attributes in the prompt. For a count use InstructSAM; for one specifically described region use RemoteSAM.
+An unavailable observation does not mean that no ships exist.""")
+def Strip_R_CNN(input_image_path: ImagePath, text_prompt: ShipPrompt):
     return _lookup("Strip-R-CNN", input_image_path, text_prompt=text_prompt)
 
 
-@mcp.tool(description="Return cached SM3Det object detections.")
-def SM3Det(input_image_path: str, text_prompt: str):
+@mcp.tool(description="""Detect all instances of a supported object category matching text_prompt in one remote sensing image.
+Return a list of [x_min, y_min, x_max, y_max] boxes in original-image pixels.
+Preserve any requested attributes and spatial conditions. A category-only request asks for all instances,
+not an arbitrary single instance. Use RemoteSAM to locate one specifically described region and InstructSAM for counts.
+An unavailable observation must not be interpreted as an empty detection list.""")
+def SM3Det(input_image_path: ImagePath, text_prompt: DetectionPrompt):
     return _lookup("SM3Det", input_image_path, text_prompt=text_prompt)
 
 
-@mcp.tool(description="Return a cached RemoteSAM grounding bounding box.")
-def RemoteSAM(input_image_path: str, text_prompt: str):
+@mcp.tool(description="""Locate one target region identified by the complete text_prompt in a remote sensing image.
+Return one [x_min, y_min, x_max, y_max] box in original-image pixels.
+Preserve every direction, size, color, ordinal and relational condition from the task.
+When several objects can match a category-only prompt, use SM3Det to obtain candidates and provide
+a distinguishing description. This tool does not return all instances or select an arbitrary highest-confidence match.
+Ambiguity and unavailable observations are errors, not evidence that the target is absent.""")
+def RemoteSAM(input_image_path: ImagePath, text_prompt: GroundingPrompt):
     return _lookup("RemoteSAM", input_image_path, text_prompt=text_prompt)
 
 
-@mcp.tool(description="Return a cached InstructSAM object count.")
-def InstructSAM(input_image_path: str, text_prompt: str):
+@mcp.tool(description="""Count all objects matching text_prompt in one remote sensing image and return an integer.
+Preserve every requested attribute and restriction on which instances to include; do not drop conditions to get a total count.
+This tool returns a count, not boxes or a segmentation mask. Use SM3Det for boxes, RemoteSAM for one described region,
+and SAM2 to segment regions from supplied boxes. An unavailable observation is not a zero count.""")
+def InstructSAM(input_image_path: ImagePath, text_prompt: CountingPrompt):
     return _lookup("InstructSAM", input_image_path, text_prompt=text_prompt)
 
 
-@mcp.tool(description="Copy a cached SAM2 segmentation mask to the requested output path.")
-def SAM2(input_image_path: str, bboxes: list[list[float]], output_path: str):
+@mcp.tool(description="""Segment regions specified by one or more bounding boxes using SAM2.
+Supply boxes in the original image's pixel coordinates, each [x_min, y_min, x_max, y_max].
+Obtain boxes with SM3Det or RemoteSAM when necessary; SAM2 follows the supplied boxes and does not correct target selection.
+Save the union of the foreground masks at the original image dimensions to output_path, with 255 for foreground and 0 for background.
+Return a message containing the saved mask path. The mask does not assign separate instance IDs.""")
+def SAM2(input_image_path: ImagePath, bboxes: BoundingBoxes, output_path: OutputPath):
     output_path = resolve_output_path(output_path, TEMP_DIR)
     result = _lookup("SAM2", input_image_path, bbox=bboxes)
-    return _copy_cached_artifact(result, output_path)
+    return _copy_cached_artifact(os.fspath(result), output_path)
 
 
-@mcp.tool(description="Copy a cached ChangeOS change mask to the requested output path.")
-def ChangeOS(pre_image_path: str, post_image_path: str, output_path: str):
+@mcp.tool(description="""Detect building damage from an aligned pre-event and post-event image pair using ChangeOS.
+The images must cover the same area on the same pixel grid and have equal dimensions; preserve temporal order.
+Save a binary mask of damaged building pixels (255 selected, 0 otherwise) to output_path.
+Passing the same image for both inputs instead produces a building footprint mask.
+This is a building-specific operation, not a general vegetation, water or land-cover change detector.
+Return a message containing the saved mask path.""")
+def ChangeOS(
+    pre_image_path: Annotated[str, Field(min_length=1, pattern=r"\S", description="Aligned pre-event image path. For building footprints, use the same image in both inputs.")],
+    post_image_path: Annotated[str, Field(min_length=1, pattern=r"\S", description="Aligned post-event image path, on the same pixel grid as the pre-event image. Do not reverse temporal order.")],
+    output_path: OutputPath,
+):
     output_path = resolve_output_path(output_path, TEMP_DIR)
-    result = _lookup(
-        "ChangeOS",
-        pre_image_path,
-        second_file_path=post_image_path,
-    )
-    return _copy_cached_artifact(result, output_path)
+    result = _lookup("ChangeOS", pre_image_path, second_file_path=post_image_path)
+    return _copy_cached_artifact(os.fspath(result), output_path)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,41 @@
+[project]
+name = "earthbench-perception-cache"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "torch==2.6.0+cu126",
+  "torchvision==0.21.0+cu126",
+  "numpy==1.26.4",
+  "Pillow>=11",
+  "open-clip-torch==2.26.1",
+  "transformers==4.57.1",
+  "sam2==1.1.0",
+  "changeos==0.2",
+  "nvidia-cublas-cu12==12.6.4.1",
+  "nvidia-cuda-cupti-cu12==12.6.80",
+  "nvidia-cuda-nvrtc-cu12==12.6.77",
+  "nvidia-cuda-runtime-cu12==12.6.77",
+  "nvidia-cudnn-cu12==9.5.1.17",
+  "nvidia-cufft-cu12==11.3.0.4",
+  "nvidia-curand-cu12==10.3.7.77",
+  "nvidia-cusolver-cu12==11.7.1.2",
+  "nvidia-cusparse-cu12==12.5.4.2",
+  "nvidia-cusparselt-cu12==0.6.3",
+  "nvidia-nccl-cu12==2.21.5",
+  "nvidia-nvjitlink-cu12==12.6.85",
+  "nvidia-nvtx-cu12==12.6.77",
+  "triton==3.2.0",
+  "ultralytics>=8.3,<9",
+  "sentencepiece>=0.2",
+  "protobuf>=4",
+]
+
+[tool.uv.sources]
+torch = { index = "pytorch" }
+torchvision = { index = "pytorch" }
+changeos = { path = "/home/dijkstra/storage-extras/model/RSMeM-cache-builder/ChangeOS" }
+
+[[tool.uv.index]]
+name = "pytorch"
+url = "https://download.pytorch.org/whl/cu126"
+explicit = true
