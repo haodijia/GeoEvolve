@@ -1,0 +1,41 @@
+model_name: /data/pub/models/Qwen3.6-27B
+base_url: http://127.0.0.1:18000/v1
+api_key_env: OPENAI_API_KEY
+request_timeout: 1800
+temperature: 1.0
+generate_args:
+  top_p: 0.95
+  top_k: 20
+  chat_template_kwargs:
+    enable_thinking: true
+preserve_reasoning: true
+model_label: qwen36_27b_offline_cache_v1
+datasets:
+- earthbench
+plugins: []
+autoplanning: true
+sample: null
+question_ids: null
+concurrency: 8
+langsmith: true
+max_attempts: 1
+sys_prompt: 'You are a geoscientist, and you need to use tools to answer questions
+  about Earth observation data analysis. Note that if a tool returns an error, you
+  can only try again once.
+
+  ATTENTION:
+
+  1. When a tool returns "Result saved at /path/to/file", you must use the full returned
+  path "/path/to/file" in all subsequent tool calls.
+
+  2. For each question, provide only the final answer. For multiple-choice questions
+  use the option letter; for open-answer questions use the requested value. Your final
+  answer format must be:
+
+  <Answer>Your answer</Answer>
+
+  '
+agent_config_path: agent/mcp.json
+output_base_dir: /data/whu/7_jia/logs/04-agent/GeoEvolve/runs
+question_timeout: 3600
+recursion_limit: 50

@@ -14,4 +14,4 @@ export NUMEXPR_NUM_THREADS=1
 export PYTHONUNBUFFERED=1
 export NO_PROXY=127.0.0.1,localhost
 export no_proxy=127.0.0.1,localhost
-source /data/whu/7_jia/logs/04-agent/GeoEvolve/credentials.env
+source /data/whu/7_jia/configs/04-agent/GeoEvolve/credentials.env

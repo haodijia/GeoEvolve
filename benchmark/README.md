@@ -36,6 +36,10 @@ uv run --locked python -m benchmark.prepare
 
 # 离线校验全部发布文件，不生成数据目录内的临时报告
 uv run --locked python -m benchmark.prepare --check
+
+# 下载与检查经审核的感知缓存补丁（固定 ModelScope commit）
+uv run --locked python -m benchmark.prepare_perception_patch
+uv run --locked python -m benchmark.prepare_perception_patch --check
 ```
 
 版本锁固定 manifest 的 SHA-256，manifest 固定每个文件的大小与内容。重复运行下载命令会校验已有文件并仅下载缺失或不匹配的文件；校验失败则报错。`--revision <commit>` 可指定上传后的 ModelScope commit，仍须通过同一个内容版本锁。`--report /path/to/report.json` 可将校验报告写到数据集之外。

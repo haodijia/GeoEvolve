@@ -4,6 +4,17 @@
 `/home/dijkstra/data/earthbench_perception_patch/observations.json`。
 模型和审核材料保存在数据目录；未修改发布数据集，未重跑 LLM 全量评测。
 
+补丁现已发布到 ModelScope 数据集 `haodijia/EarthBench-Fixed` 的
+`perception/patches/trajectory-repair-v1/`，固定 commit 为
+`2e260612848b3e2b1c55367f82e4d84c01ccbb94`。原数据版本保持不变；新增观测与掩膜
+作为独立补丁安装在数据集旁。代码侧 `benchmark/earthbench_perception_patch.lock.json`
+固定发布位置与版本，不新增文件哈希。
+
+```bash
+uv run --locked python -m benchmark.prepare_perception_patch
+uv run --locked python -m benchmark.prepare_perception_patch --check
+```
+
 ## 范围和覆盖
 
 来源为以下三轮，各 248 题，共 744 条轨迹：
